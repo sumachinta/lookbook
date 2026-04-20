@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wardrobe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+:root {
+  --bg: #faf9f7;
+  --bg2: #f2f0ec;
+  --bg3: #e8e5df;
+  --text: #191816;
+  --text2: #7a756d;
+  --text3: #b5b0a8;
+  --border: rgba(0,0,0,0.07);
+  --border2: rgba(0,0,0,0.14);
+  --radius: 6px;
+  --radius-lg: 10px;
+  --accent: #5060f0;
+  --accent-bg: #eef0ff;
+  --nav-h: 48px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110;
+    --bg2: #1b1a18;
+    --bg3: #252420;
+    --text: #eeebe5;
+    --text2: #908b82;
+    --text3: #4e4a44;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.14);
+    --accent-bg: #171a30;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'Jost', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg3);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+#root { max-width: 1080px; margin: 0 auto; }
+
+/* ── Base elements ── */
+input, select, textarea {
+  font-family: inherit; font-size: 13px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 8px 11px; width: 100%;
+  outline: none; transition: border-color 0.15s;
+  -webkit-appearance: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--text3); }
+button {
+  font-family: inherit; cursor: pointer;
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  background: transparent; color: var(--text);
+  padding: 7px 14px; font-size: 13px; font-weight: 400;
+  transition: background 0.12s, opacity 0.12s;
+  letter-spacing: 0.01em;
+}
+button:hover { background: var(--bg2); }
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
+.btn-primary:hover { opacity: 0.86; background: var(--text); }
+.btn-ai { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); font-weight: 500; }
+.btn-ai:hover { opacity: 0.85; background: var(--accent-bg); }
+.btn-danger { color: #c03030; border-color: #c03030; }
+.btn-danger:hover { background: #fff0f0; }
+.tag {
+  display: inline-block; font-size: 11px; padding: 3px 9px;
+  border-radius: 20px; background: var(--bg2); color: var(--text2);
+  border: 1px solid var(--border); margin: 2px;
+  font-weight: 400; letter-spacing: 0.02em;
+}
+.pill { font-size: 11px; padding: 2px 9px; border-radius: 20px; display: inline-block; font-weight: 500; }
+.cat-Top       { background:#deeef9; color:#0c4880; }
+.cat-Bottom    { background:#dff0d5; color:#235a08; }
+.cat-Shoes     { background:#fae9cc; color:#6b3d08; }
+.cat-Outerwear { background:#ece9fd; color:#3c318a; }
+.cat-Accessory { background:#fae3ee; color:#7a2040; }
+.cat-Dress     { background:#d8f4ec; color:#07523c; }
+.cat-Other     { background:#eeebe4; color:#444440; }
+
+/* ── Overlay & modals ── */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 300; backdrop-filter: blur(6px);
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+@keyframes slideUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
+.modal {
+  background: var(--bg); border-radius: var(--radius-lg);
+  border: 1px solid var(--border2); padding: 1.5rem;
+  width: 420px; max-height: 92vh; overflow-y: auto;
+  box-shadow: 0 30px 90px rgba(0,0,0,0.3);
+  animation: slideUp 0.2s ease;
+}
+
+/* ── Item detail modal ── */
+.detail-modal {
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border2);
+  width: min(860px, 95vw);
+  max-height: 90vh;
+  display: flex;
+  overflow: hidden;
+  box-shadow: 0 35px 100px rgba(0,0,0,0.35);
+  animation: slideUp 0.2s ease;
+}
+.detail-img-pane {
+  flex: 0 0 56%;
+  background: var(--bg2);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative; min-height: 440px;
+}
+.detail-img-pane img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.detail-img-pane .no-photo {
+  font-size: 80px; opacity: 0.35;
+}
+.detail-info-pane {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+}
+.detail-scroll {
+  flex: 1; overflow-y: auto; padding: 2rem 1.75rem 1rem;
+}
+.detail-scroll h2 {
+  font-size: 19px; font-weight: 600; line-height: 1.3;
+  margin-bottom: 12px; letter-spacing: -0.01em;
+}
+.detail-meta-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; flex-wrap: wrap;
+}
+.detail-brand {
+  font-size: 13px; color: var(--text2); margin-top: 4px; margin-bottom: 14px;
+}
+.detail-tags { margin-top: 14px; }
+.detail-tags-label {
+  font-size: 10px; font-weight: 600; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
+}
+.detail-actions {
+  padding: 1rem 1.75rem 1.75rem;
+  display: flex; gap: 8px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.detail-close {
+  position: absolute; top: 12px; right: 12px;
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; padding: 0; border: 1px solid var(--border2);
+  background: var(--bg); z-index: 1; flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .detail-modal { flex-direction: column; max-height: 96vh; }
+  .detail-img-pane { flex: 0 0 52vw; min-height: 0; }
+}
+
+/* ── Top nav ── */
+.top-nav {
+  height: var(--nav-h);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 1.25rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.nav-tabs { display: flex; gap: 0; }
+.nav-tab {
+  padding: 0 16px; height: var(--nav-h);
+  font-size: 13px; font-weight: 400;
+  border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  background: transparent; color: var(--text2);
+  letter-spacing: 0.03em; text-transform: uppercase;
+  transition: color 0.13s;
+  display: flex; align-items: center; gap: 6px;
+}
+.nav-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+.nav-tab:hover { background: transparent; color: var(--text); }
+.settings-btn {
+  padding: 5px 10px; font-size: 12px;
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--text2); display: flex; align-items: center; gap: 5px;
+}
+.settings-badge { font-size: 9px; font-weight: 700; }
+
+/* ── Toolbar (filters + add) ── */
+.toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 1.25rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.toolbar::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex-shrink: 0; padding: 5px 13px; border-radius: 20px;
+  font-size: 12px; border: 1px solid var(--border2);
+  background: transparent; color: var(--text2);
+  white-space: nowrap; transition: all 0.12s;
+  letter-spacing: 0.02em;
+}
+.cat-chip:hover { color: var(--text); background: var(--bg2); }
+.cat-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+.cat-chip.active:hover { background: var(--text); }
+.toolbar-divider {
+  width: 1px; height: 20px; background: var(--border2); flex-shrink: 0; margin: 0 2px;
+}
+.search-input {
+  flex: 1 1 130px; min-width: 100px; max-width: 200px;
+  background: var(--bg2) !important; border-color: transparent !important;
+  font-size: 12px !important;
+}
+.search-input:focus { border-color: var(--border2) !important; background: var(--bg) !important; }
+.add-btn {
+  flex-shrink: 0; padding: 5px 14px;
+  font-size: 12px; font-weight: 600;
+  background: var(--text); color: var(--bg); border-color: var(--text);
+  border-radius: var(--radius);
+}
+.add-btn:hover { opacity: 0.85; background: var(--text); }
+
+/* ── Photo grid ── */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+}
+@media (max-width: 860px) {
+  .photo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .photo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ── Grid card (photo-only) ── */
+.grid-card {
+  cursor: pointer;
+  aspect-ratio: 3/4;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg2);
+  transition: opacity 0.15s;
+}
+.grid-card:hover { opacity: 0.88; }
+.grid-card img {
+  width: 100%; height: 100%; object-fit: cover;
+  display: block; transition: transform 0.3s ease;
+}
+.grid-card:hover img { transform: scale(1.04); }
+.grid-card-emoji {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 42px; opacity: 0.35;
+}
+/* Tiny category indicator — bottom-left corner */
+.grid-cat-dot {
+  position: absolute; bottom: 6px; left: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.8);
+  pointer-events: none;
+}
+.dot-Top       { background: #4a9fdc; }
+.dot-Bottom    { background: #52a836; }
+.dot-Shoes     { background: #d07a28; }
+.dot-Outerwear { background: #7869cc; }
+.dot-Accessory { background: #c44e7a; }
+.dot-Dress     { background: #28a885; }
+.dot-Other     { background: #999; }
+
+/* Selected state for builder */
+.grid-card.selected::after {
+  content: '✓';
+  position: absolute; top: 7px; right: 7px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--text); color: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  border: 1.5px solid rgba(255,255,255,0.5);
+}
+.grid-card.selected { outline: 2px solid var(--text); outline-offset: -2px; }
+
+/* ── Misc layout ── */
+.grid-2 { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; font-size: 11px; font-weight: 600; color: var(--text3); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.07em; }
+.section-label { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 10px; }
+.empty-state { text-align: center; padding: 4rem 1rem; color: var(--text3); font-size: 13px; line-height: 2.2; }
+.ai-banner { background: var(--accent-bg); border: 1px solid rgba(80,96,240,0.2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; color: var(--accent); margin-bottom: 12px; line-height: 1.6; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Builder layout */
+.builder-wrap {
+  display: grid;
+  grid-template-columns: minmax(0,1.65fr) minmax(0,1fr);
+  gap: 0;
+  height: calc(100vh - var(--nav-h) - 1px);
+  overflow: hidden;
+}
+@media (max-width: 640px) {
+  .builder-wrap { grid-template-columns: 1fr; height: auto; }
+}
+.builder-left {
+  overflow-y: auto; border-right: 1px solid var(--border);
+}
+.builder-right {
+  overflow-y: auto; padding: 1.25rem;
+  background: var(--bg);
+}
+.builder-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+
+/* Outfit cards */
+.outfit-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 1rem;
+  transition: border-color 0.15s;
+}
+.outfit-card:hover { border-color: var(--border2); }
+
+/* Card (for old selectable use) */
+.card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color 0.15s; }
+.card:hover { border-color: var(--border2); }
+.card.selected { border: 2px solid var(--text); }
+.img-box { width: 100%; aspect-ratio: 3/4; background: var(--bg2); overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 36px; }
+.img-box img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Content area */
+.content { padding: 0; background: var(--bg3); min-height: calc(100vh - var(--nav-h) - 1px); }
+.outfits-content { padding: 1.25rem; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect, useRef } = React;
+
+const CATEGORIES = ['Top','Bottom','Shoes','Outerwear','Accessory','Dress','Other'];
+const CAT_EMOJI  = { Top:'👕', Bottom:'👖', Shoes:'👟', Outerwear:'🧥', Dress:'👗', Accessory:'💍', Other:'👔' };
+const OUTFIT_OCCASIONS = [
+  'Casual Day','Weekend','Brunch','Work','Smart Casual','Date Night',
+  'Party','Night Out','Travel','Beach','Summer','Winter','Formal',
+  'Wedding Guest','Festival','Gym'
+];
+const STORAGE_KEY_ITEMS      = 'outfitguide_items';
+const STORAGE_KEY_OUTFITS    = 'outfitguide_outfits';
+const STORAGE_KEY_APIKEY     = 'outfitguide_apikey';
+const STORAGE_KEY_CLOUDINARY = 'outfitguide_cloudinary';
+
+const SAMPLE_ITEMS = [
+  { id:1, name:'White linen shirt',     category:'Top',       color:'White',      brand:'Uniqlo', cost:29, tags:['casual','summer'],         photo:'', purchaseLink:'' },
+  { id:2, name:'Slim navy chinos',       category:'Bottom',    color:'Navy',       brand:'Gap',    cost:55, tags:['smart-casual','versatile'],photo:'', purchaseLink:'' },
+  { id:3, name:'Black ankle boots',      category:'Shoes',     color:'Black',      brand:'Zara',   cost:89, tags:['winter','formal'],          photo:'', purchaseLink:'' },
+  { id:4, name:'Oversized beige blazer', category:'Outerwear', color:'Beige',      brand:'H&M',    cost:70, tags:['smart-casual','autumn'],    photo:'', purchaseLink:'' },
+  { id:5, name:'White sneakers',         category:'Shoes',     color:'White',      brand:'Adidas', cost:80, tags:['casual','summer'],          photo:'', purchaseLink:'' },
+  { id:6, name:'Black turtleneck',       category:'Top',       color:'Black',      brand:'COS',    cost:45, tags:['winter','minimal'],         photo:'', purchaseLink:'' },
+  { id:7, name:'Midi floral dress',      category:'Dress',     color:'Multicolor', brand:'Mango',  cost:60, tags:['summer','feminine'],        photo:'', purchaseLink:'' },
+  { id:8, name:'Dark wash jeans',        category:'Bottom',    color:'Indigo',     brand:"Levi's", cost:75, tags:['casual','versatile'],       photo:'', purchaseLink:'' },
+];
+const SAMPLE_OUTFITS = [
+  { id:1, name:'Smart casual friday', itemIds:[1,2,4,5], occasions:['Smart Casual','Work'], notes:'Great for office-casual days' },
+  { id:2, name:'Winter editorial',    itemIds:[6,8,3,4], occasions:['Winter','Date Night'],  notes:'Monochrome with blazer layering' },
+];
+
+function loadState(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+
+async function uploadToCloudinary(file, cloudName, uploadPreset) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', uploadPreset);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method:'POST', body:formData });
+  if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error?.message || `Cloudinary error (${res.status})`); }
+  return (await res.json()).secure_url;
+}
+
+async function analyzeClothingImage(photoUrl, apiKey) {
+  const imageSource = photoUrl.startsWith('http')
+    ? { type:'url', url:photoUrl }
+    : { type:'base64', media_type:photoUrl.split(';')[0].split(':')[1]||'image/jpeg', data:photoUrl.split(',')[1] };
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:300, messages:[{ role:'user', content:[
+      { type:'image', source:imageSource },
+      { type:'text', text:`Analyze this clothing item. Reply ONLY with a valid JSON object, no markdown:\n{"name":"short descriptive name","category":"one of: Top Bottom Shoes Outerwear Accessory Dress Other","color":"primary color","tags":["2 to 4 tags from: casual formal smart-casual summer winter autumn spring minimal feminine streetwear athletic bohemian vintage crop oversized fitted knit denim leather floral printed versatile"]}` }
+    ]}]})
+  });
+  if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
+  const data = await res.json();
+  return JSON.parse((data.content?.find(b=>b.type==='text')?.text||'').replace(/```json|```/g,'').trim());
+}
+
+async function suggestOutfitOccasions(selectedItems, apiKey) {
+  const contentBlocks = [];
+  for (const item of selectedItems) {
+    if (item.photo) {
+      const imageSource = item.photo.startsWith('http')
+        ? { type:'url', url:item.photo }
+        : { type:'base64', media_type:item.photo.split(';')[0].split(':')[1]||'image/jpeg', data:item.photo.split(',')[1] };
+      contentBlocks.push({ type:'image', source:imageSource });
+    }
+  }
+  const itemSummary = selectedItems.map(i=>`${i.name} (${i.category}, ${i.color}${i.tags.length?', '+i.tags.join('/'):''})`).join('; ');
+  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 occasion tags. Reply ONLY with a JSON array.\nAvailable: ${OUTFIT_OCCASIONS.join(', ')}\nExample: ["Date Night","Summer"]` });
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:150, messages:[{ role:'user', content:contentBlocks }]})
+  });
+  if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
+  const data = await res.json();
+  const parsed = JSON.parse((data.content?.find(b=>b.type==='text')?.text||'[]').replace(/```json|```/g,'').trim());
+  return parsed.filter(o=>OUTFIT_OCCASIONS.includes(o));
+}
+
+function OccasionPicker({ selected, onChange }) {
+  const toggle = occ => onChange(selected.includes(occ) ? selected.filter(o=>o!==occ) : [...selected, occ]);
+  return (
+    <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+      {OUTFIT_OCCASIONS.map(occ => {
+        const active = selected.includes(occ);
+        return (
+          <button key={occ} onClick={()=>toggle(occ)} style={{
+            padding:'4px 11px', fontSize:12, borderRadius:20,
+            border: active ? '1.5px solid var(--text)' : '1px solid var(--border2)',
+            background: active ? 'var(--text)' : 'transparent',
+            color: active ? 'var(--bg)' : 'var(--text2)',
+            fontWeight: active ? 600 : 400, transition:'all 0.12s'
+          }}>{occ}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function colorDot(c) {
+  const map = { White:'#f0f0f0', Black:'#1a1a1a', Navy:'#1e3a5f', Beige:'#d4b896', Indigo:'#3c4f7c', Blue:'#378ADD', Red:'#E24B4A', Green:'#639922', Pink:'#D4537E', Brown:'#8B5E3C', Grey:'#888780', Gray:'#888780', Yellow:'#EF9F27', Orange:'#D85A30', Purple:'#7F77DD' };
+  return <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%', background:map[c]||'#b0b0b0', border:'1px solid var(--border2)', marginRight:5, verticalAlign:'middle', flexShrink:0 }} />;
+}
+
+/* ── Settings Modal ── */
+function SettingsModal({ onClose }) {
+  const [key, setKey] = useState(() => localStorage.getItem(STORAGE_KEY_APIKEY)||'');
+  const [saved, setSaved] = useState(false);
+  const loadCloud = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); } catch { return {}; } };
+  const [cloudName, setCloudName] = useState(()=>loadCloud().cloudName||'');
+  const [uploadPreset, setUploadPreset] = useState(()=>loadCloud().uploadPreset||'');
+  const [cloudSaved, setCloudSaved] = useState(false);
+  const saveApiKey = () => { localStorage.setItem(STORAGE_KEY_APIKEY, key.trim()); setSaved(true); setTimeout(()=>setSaved(false),1500); };
+  const saveCloudinary = () => {
+    localStorage.setItem(STORAGE_KEY_CLOUDINARY, JSON.stringify({ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() }));
+    setCloudSaved(true); setTimeout(()=>{ setCloudSaved(false); onClose(); }, 900);
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width:380 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem' }}>
+          <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>Settings</p>
+          <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ marginBottom:20 }}>
+          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Photo Storage — Cloudinary</p>
+          <div className="ai-banner" style={{ marginBottom:10, fontSize:11 }}>
+            Photos upload to Cloudinary's free CDN — accessible on any device, no storage limits.
+          </div>
+          <div className="form-row"><label>Cloud name</label><input value={cloudName} onChange={e=>setCloudName(e.target.value)} placeholder="e.g. my-wardrobe-app" /></div>
+          <div className="form-row"><label>Upload preset (unsigned)</label><input value={uploadPreset} onChange={e=>setUploadPreset(e.target.value)} placeholder="e.g. outfit_unsigned" /></div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn-primary" style={{ flex:1 }} onClick={saveCloudinary} disabled={!cloudName.trim()||!uploadPreset.trim()}>{cloudSaved?'✓ Saved!':'Save Cloudinary'}</button>
+            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(STORAGE_KEY_CLOUDINARY); setCloudName(''); setUploadPreset(''); }}>Remove</button>}
+          </div>
+        </div>
+        <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'0 0 18px' }} />
+        <div>
+          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>AI Auto-fill — Anthropic</p>
+          <div className="ai-banner" style={{ fontSize:11 }}>Upload a photo → Claude suggests name, category, color &amp; tags.</div>
+          <div className="form-row"><label>Anthropic API key</label>
+            <input type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder="sk-ant-..." />
+            <p style={{ fontSize:10, color:'var(--text3)', marginTop:5, lineHeight:1.5 }}>Get a key at <a href="https://console.anthropic.com" target="_blank" style={{ color:'var(--accent)' }}>console.anthropic.com</a> · stored only in this browser.</p>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn-primary" style={{ flex:1 }} onClick={saveApiKey}>{saved?'✓ Saved!':'Save API key'}</button>
+            {key && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(STORAGE_KEY_APIKEY); setKey(''); }}>Remove</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Item Detail Modal (click on grid card) ── */
+function ItemDetailModal({ item, onClose, onEdit, onDelete }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="detail-modal" onClick={e=>e.stopPropagation()}>
+        {/* Left — image */}
+        <div className="detail-img-pane">
+          {item.photo
+            ? <img src={item.photo} alt={item.name} onError={e=>e.target.style.display='none'} />
+            : <span className="no-photo">{CAT_EMOJI[item.category]||'👔'}</span>
+          }
+        </div>
+        {/* Right — details */}
+        <div className="detail-info-pane">
+          <button className="detail-close" onClick={onClose}>✕</button>
+          <div className="detail-scroll">
+            <div style={{ marginTop: 8 }}>
+              <div className="detail-meta-row" style={{ marginBottom:6 }}>
+                <span className={`pill cat-${item.category}`}>{item.category}</span>
+                {item.color && <span style={{ display:'flex', alignItems:'center', fontSize:12, color:'var(--text2)' }}>{colorDot(item.color)}{item.color}</span>}
+              </div>
+              <h2>{item.name}</h2>
+              {(item.brand || item.cost) && (
+                <div className="detail-brand">
+                  {item.brand && <span>{item.brand}</span>}
+                  {item.brand && item.cost ? <span style={{ color:'var(--text3)', margin:'0 5px' }}>·</span> : null}
+                  {item.cost ? <span>${item.cost}</span> : null}
+                </div>
+              )}
+              {item.tags?.length > 0 && (
+                <div className="detail-tags">
+                  <div className="detail-tags-label">Tags</div>
+                  <div>{item.tags.map(t=><span key={t} className="tag">{t}</span>)}</div>
+                </div>
+              )}
+              {item.purchaseLink && (
+                <a href={item.purchaseLink} target="_blank" rel="noopener"
+                   style={{ display:'inline-flex', alignItems:'center', gap:5, marginTop:18, fontSize:12, color:'var(--accent)', textDecoration:'none', fontWeight:500 }}>
+                  🛍 Shop link
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="detail-actions">
+            <button className="btn-primary" style={{ flex:1 }} onClick={()=>onEdit(item)}>Edit</button>
+            <button className="btn-danger" style={{ flex:1 }} onClick={()=>{ onDelete(item.id); onClose(); }}>Remove</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Item Add/Edit Modal ── */
+function ItemModal({ item, onSave, onClose }) {
+  const init = item || { name:'', category:'Top', color:'', brand:'', cost:'', tags:'', photo:'', purchaseLink:'' };
+  const [form, setForm] = useState({ ...init, tags:Array.isArray(init.tags)?init.tags.join(', '):init.tags, cost:init.cost||'' });
+  const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadErr, setUploadErr] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiDone, setAiDone] = useState(false);
+  const fileRef = useRef();
+  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
+  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); } catch { return {}; } })();
+  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const autoFill = async (overridePhoto) => {
+    const photo = overridePhoto || form.photo;
+    if(!photo||!apiKey) return;
+    setAnalyzing(true); setAiError(''); setAiDone(false);
+    try {
+      const r = await analyzeClothingImage(photo, apiKey);
+      setForm(f=>({ ...f, name:r.name||f.name, category:CATEGORIES.includes(r.category)?r.category:f.category, color:r.color||f.color, tags:Array.isArray(r.tags)?r.tags.join(', '):f.tags }));
+      setAiDone(true);
+    } catch(err) { setAiError('AI analysis failed. Check your API key in Settings.'); }
+    setAnalyzing(false);
+  };
+
+  const handleFile = async e => {
+    const file = e.target.files[0]; if(!file) return;
+    setUploadErr(''); setAiDone(false);
+    const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
+    set('photo', localPreview);
+    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); if(apiKey) autoFill(localPreview); return; }
+    setUploading(true); setUploadPct(20);
+    try {
+      setUploadPct(50);
+      const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+      setUploadPct(100); set('photo', url);
+      if(apiKey) autoFill(url);
+    } catch(err) { setUploadErr(err.message||'Upload failed.'); }
+    setUploading(false); setUploadPct(0);
+  };
+
+  const submit = () => {
+    if(!form.name.trim()) return;
+    onSave({ ...form, cost:form.cost?Number(form.cost):null, tags:form.tags.split(',').map(t=>t.trim()).filter(Boolean), id:item?item.id:Date.now() });
+    onClose();
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem' }}>
+          <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>{item?'Edit item':'Add item'}</p>
+          <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
+        </div>
+
+        <div className="form-row">
+          <label>Photo</label>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handleFile} />
+          <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
+            <div style={{ width:72, height:90, border:'1px solid var(--border2)', background:'var(--bg2)', overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, position:'relative', borderRadius:'var(--radius)' }}>
+              {form.photo ? <img src={form.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="preview" /> : <span>{CAT_EMOJI[form.category]||'👔'}</span>}
+              {uploading && <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}><span className="spinner" style={{ borderColor:'#fff', borderTopColor:'transparent' }}/></div>}
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
+              <button onClick={()=>fileRef.current.click()} disabled={uploading}>
+                {uploading ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</> : form.photo ? '📷 Change photo' : '📷 Upload photo'}
+              </button>
+              {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
+              {form.photo && apiKey && (
+                <button className="btn-ai" onClick={()=>autoFill()} disabled={analyzing||uploading}>
+                  {analyzing ? <><span className="spinner"/>Analyzing…</> : aiDone ? '✓ Auto-filled · ↺ Re-analyze' : '↺ Re-analyze'}
+                </button>
+              )}
+              {uploadErr && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{uploadErr}</p>}
+              {aiError && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{aiError}</p>}
+              {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setAiDone(false); setUploadErr(''); }}>Remove photo</button>}
+              {form.photo && form.photo.startsWith('http') && <p style={{ fontSize:10, color:'#39a855' }}>☁ On Cloudinary CDN</p>}
+            </div>
+          </div>
+        </div>
+
+        <div className="form-row"><label>Name *</label><input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="e.g. Blue ribbed crop top" autoFocus={!item} /></div>
+        <div className="grid-2" style={{ marginBottom:12 }}>
+          <div className="form-row" style={{ marginBottom:0 }}><label>Category</label>
+            <select value={form.category} onChange={e=>set('category',e.target.value)}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select>
+          </div>
+          <div className="form-row" style={{ marginBottom:0 }}><label>Color</label><input value={form.color} onChange={e=>set('color',e.target.value)} placeholder="e.g. Blue" /></div>
+        </div>
+        <div className="grid-2" style={{ marginBottom:12 }}>
+          <div className="form-row" style={{ marginBottom:0 }}><label>Brand</label><input value={form.brand} onChange={e=>set('brand',e.target.value)} placeholder="e.g. Zara" /></div>
+          <div className="form-row" style={{ marginBottom:0 }}><label>Cost ($)</label><input type="number" value={form.cost} onChange={e=>set('cost',e.target.value)} placeholder="0" /></div>
+        </div>
+        <div className="form-row"><label>Tags</label><input value={form.tags} onChange={e=>set('tags',e.target.value)} placeholder="casual, summer, crop, knit" /></div>
+        <div className="form-row"><label>Purchase link</label><input value={form.purchaseLink||''} onChange={e=>set('purchaseLink',e.target.value)} placeholder="https://…" /></div>
+        <div style={{ display:'flex', gap:8, marginTop:'1rem' }}>
+          <button className="btn-primary" style={{ flex:1 }} onClick={submit}>{item?'Save changes':'Add item'}</button>
+          <button style={{ flex:1 }} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Grid Card (photo-only) ── */
+function GridCard({ item, onClick, selectable, selected, onSelect }) {
+  return (
+    <div
+      className={`grid-card${selected?' selected':''}`}
+      onClick={selectable ? onSelect : () => onClick && onClick(item)}
+    >
+      {item.photo
+        ? <img src={item.photo} alt={item.name} onError={e => { e.target.style.display='none'; e.target.parentNode.querySelector('.grid-card-emoji') && (e.target.parentNode.querySelector('.grid-card-emoji').style.display='flex'); }} />
+        : null
+      }
+      <div className="grid-card-emoji" style={{ display: item.photo ? 'none' : 'flex' }}>
+        {CAT_EMOJI[item.category]||'👔'}
+      </div>
+      <div className={`grid-cat-dot dot-${item.category}`} />
+    </div>
+  );
+}
+
+/* ── Wardrobe Tab ── */
+function WardrobeTab({ items, setItems }) {
+  const [modal, setModal] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [filterCat, setFilterCat] = useState('All');
+  const [search, setSearch] = useState('');
+
+  // All items that pass the active filter / search
+  const filtered = useMemo(() => items.filter(i => {
+    if(filterCat !== 'All' && i.category !== filterCat) return false;
+    if(search && ![i.name, i.brand||'', i.color||'', ...(i.tags||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }), [items, filterCat, search]);
+
+  // Group by category (only when showing All and not searching)
+  // Each entry: { category, items[] }
+  const grouped = useMemo(() => {
+    const showSections = filterCat === 'All' && !search;
+    if (!showSections) return null; // null = flat grid
+    return CATEGORIES
+      .map(cat => ({ cat, items: filtered.filter(i => i.category === cat) }))
+      .filter(g => g.items.length > 0);
+  }, [filtered, filterCat, search]);
+
+  const saveItem = item => setItems(p => p.some(i=>i.id===item.id) ? p.map(i=>i.id===item.id?item:i) : [...p, item]);
+  const handleEdit = item => { setDetail(null); setTimeout(()=>setModal(item), 80); };
+  const handleDelete = id => { setItems(p=>p.filter(i=>i.id!==id)); setDetail(null); };
+
+  return (
+    <div className="content">
+      {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} />}
+      {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} />}
+
+      {/* Toolbar */}
+      <div className="toolbar">
+        <button className={`cat-chip${filterCat==='All'?' active':''}`} onClick={()=>setFilterCat('All')}>All</button>
+        {CATEGORIES.map(c => (
+          <button key={c} className={`cat-chip${filterCat===c?' active':''}`} onClick={()=>setFilterCat(c)}>{c}</button>
+        ))}
+        <div className="toolbar-divider" />
+        <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
+        <button className="add-btn" onClick={()=>setModal('add')}>+ Add</button>
+      </div>
+
+      {/* Grid — sectioned when All, flat when filtered or searching */}
+      {filtered.length === 0
+        ? <div className="empty-state">
+            {items.length === 0
+              ? <>No items yet.<br/><span style={{fontSize:12}}>Tap <strong>+ Add</strong> to start building your wardrobe.</span></>
+              : <>No items match the filter.</>
+            }
+          </div>
+        : grouped
+          ? grouped.map(({ cat, items: catItems }) => (
+              <div key={cat}>
+                {/* Section divider — thin rule with category label */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '14px 14px 8px',
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+                    {cat} <span style={{ fontWeight: 400, opacity: 0.7 }}>· {catItems.length}</span>
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+                <div className="photo-grid" style={{ paddingTop: 0 }}>
+                  {catItems.map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
+                </div>
+              </div>
+            ))
+          : <div className="photo-grid">
+              {filtered.map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
+            </div>
+      }
+    </div>
+  );
+}
+
+/* ── Builder Tab ── */
+function BuilderTab({ items, setOutfits }) {
+  const [selected, setSelected] = useState([]);
+  const [occasions, setOccasions] = useState([]);
+  const [outfitName, setOutfitName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [filterCat, setFilterCat] = useState('All');
+  const [saved, setSaved] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
+  const toggle = id => setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
+  const filtered = filterCat==='All' ? items : items.filter(i=>i.category===filterCat);
+  const grouped = filterCat==='All'
+    ? CATEGORIES.map(cat=>({ cat, items:filtered.filter(i=>i.category===cat) })).filter(g=>g.items.length>0)
+    : null;
+  const selectedItems = items.filter(i=>selected.includes(i.id));
+  const canSave = selected.length >= 2 && occasions.length > 0;
+
+  const suggestOcc = async () => {
+    if(!selectedItems.length||!apiKey) return;
+    setAiLoading(true); setAiError('');
+    try { const s = await suggestOutfitOccasions(selectedItems, apiKey); setOccasions(s); }
+    catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
+    setAiLoading(false);
+  };
+
+  const saveOutfit = () => {
+    if(!canSave) return;
+    const name = outfitName.trim() || occasions.join(' · ');
+    setOutfits(p=>[...p,{ id:Date.now(), name, itemIds:selected, occasions, notes }]);
+    setSelected([]); setOccasions([]); setOutfitName(''); setNotes('');
+    setSaved(true); setTimeout(()=>setSaved(false), 2000);
+  };
+
+  return (
+    <div className="builder-wrap">
+      {/* Left — picker */}
+      <div className="builder-left">
+        <div className="builder-toolbar">
+          <p className="section-label" style={{ margin:0, flex:1 }}>Pick pieces</p>
+          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{ width:'auto', flex:'0 0 auto', fontSize:12, padding:'5px 8px' }}>
+            <option value="All">All</option>
+            {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <p style={{ fontSize:11, color:'var(--text3)', whiteSpace:'nowrap' }}>{selected.length} selected</p>
+        </div>
+        {items.length===0
+          ? <div className="empty-state">Add items in Wardrobe first.</div>
+          : grouped
+            ? grouped.map(({ cat, items: catItems }) => (
+                <div key={cat}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 10px 8px' }}>
+                    <span style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.1em', whiteSpace:'nowrap' }}>
+                      {cat} <span style={{ fontWeight:400, opacity:0.7 }}>· {catItems.length}</span>
+                    </span>
+                    <div style={{ flex:1, height:1, background:'var(--border)' }} />
+                  </div>
+                  <div className="photo-grid" style={{ paddingTop:0, gap:'3px', gridTemplateColumns:'repeat(4,minmax(0,1fr))' }}>
+                    {catItems.map(item => <GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}
+                  </div>
+                </div>
+              ))
+            : <div className="photo-grid" style={{ padding:'3px', gap:'3px', gridTemplateColumns:'repeat(4,minmax(0,1fr))' }}>
+                {filtered.map(item => <GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}
+              </div>
+        }
+      </div>
+
+      {/* Right — outfit config */}
+      <div className="builder-right">
+        <p className="section-label">Outfit</p>
+
+        {/* Selected preview */}
+        {selectedItems.length > 0 && (
+          <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:14 }}>
+            {selectedItems.map(item=>(
+              <div key={item.id} style={{ display:'flex', alignItems:'center', gap:9, padding:'7px 9px', background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
+                <div style={{ width:32, height:40, borderRadius:'var(--radius)', overflow:'hidden', flexShrink:0, background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>
+                  {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : CAT_EMOJI[item.category]}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</p>
+                  <p style={{ fontSize:10, color:'var(--text2)' }}>{item.color} · {item.category}</p>
+                </div>
+                <button style={{ padding:'2px 7px', fontSize:11, border:'none', color:'var(--text3)' }} onClick={()=>toggle(item.id)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {selectedItems.length === 0 && (
+          <div style={{ padding:'1rem 0', fontSize:12, color:'var(--text3)', lineHeight:2 }}>Click items on the left to select them.</div>
+        )}
+
+        <div style={{ borderTop:'1px solid var(--border)', paddingTop:14, marginTop:4 }}>
+          <div className="form-row">
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:7 }}>
+              <label style={{ margin:0 }}>Occasion *</label>
+              {apiKey && selectedItems.length > 0 && (
+                <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>
+                  {aiLoading ? <><span className="spinner"/>…</> : '✨ AI suggest'}
+                </button>
+              )}
+            </div>
+            <OccasionPicker selected={occasions} onChange={setOccasions} />
+            {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:5 }}>{aiError}</p>}
+            {!apiKey && <p style={{ fontSize:10, color:'var(--text3)', marginTop:5 }}>Add API key in Settings for AI suggestions.</p>}
+          </div>
+          <div className="form-row">
+            <label>Label <span style={{ color:'var(--text3)', fontWeight:400, textTransform:'none' }}>(optional)</span></label>
+            <input value={outfitName} onChange={e=>setOutfitName(e.target.value)} placeholder="e.g. Favourite date look" />
+          </div>
+          <div className="form-row">
+            <label>Notes</label>
+            <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="When to wear, tips…" style={{ resize:'vertical', minHeight:52 }} />
+          </div>
+          <button className="btn-primary" style={{ width:'100%', padding:'10px' }} onClick={saveOutfit} disabled={!canSave}>
+            {saved ? '✓ Saved!' : `Save outfit (${selected.length} piece${selected.length!==1?'s':''})`}
+          </button>
+          {!canSave && <p style={{ fontSize:11, color:'var(--text3)', textAlign:'center', marginTop:6 }}>{selected.length<2?'Select at least 2 pieces':'Pick at least one occasion'}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Edit Outfit Modal ── */
+function EditOutfitModal({ outfit, items, onSave, onClose }) {
+  const [selected, setSelected] = useState(outfit.itemIds||[]);
+  const [occasions, setOccasions] = useState(outfit.occasions||[]);
+  const [outfitName, setOutfitName] = useState(outfit.name||'');
+  const [notes, setNotes] = useState(outfit.notes||'');
+  const [filterCat, setFilterCat] = useState('All');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
+  const toggle = id => setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
+  const filtered = filterCat==='All'?items:items.filter(i=>i.category===filterCat);
+  const selectedItems = items.filter(i=>selected.includes(i.id));
+  const canSave = selected.length>=2 && occasions.length>0;
+  const suggestOcc = async () => {
+    if(!selectedItems.length||!apiKey) return;
+    setAiLoading(true); setAiError('');
+    try { setOccasions(await suggestOutfitOccasions(selectedItems, apiKey)); }
+    catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
+    setAiLoading(false);
+  };
+  const submit = () => {
+    if(!canSave) return;
+    onSave({ ...outfit, name:outfitName.trim()||occasions.join(' · '), itemIds:selected, occasions, notes });
+    onClose();
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:'var(--bg)', borderRadius:'var(--radius-lg)', border:'1px solid var(--border2)', width:'min(900px,96vw)', maxHeight:'92vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 25px 80px rgba(0,0,0,0.3)', animation:'slideUp 0.2s ease' }}>
+        <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
+          <p style={{ fontWeight:600, fontSize:14, letterSpacing:'-0.01em' }}>Edit outfit</p>
+          <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'minmax(0,1.6fr) minmax(0,1fr)', gap:0, overflow:'hidden', flex:1 }}>
+          <div style={{ padding:'1rem', borderRight:'1px solid var(--border)', overflowY:'auto' }}>
+            <div style={{ display:'flex', gap:8, marginBottom:10, alignItems:'center' }}>
+              <p className="section-label" style={{ margin:0, flex:1 }}>Pieces</p>
+              <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{ width:'auto', fontSize:12, padding:'4px 8px' }}>
+                <option value="All">All</option>
+                {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+              </select>
+              <p style={{ fontSize:11, color:'var(--text3)' }}>{selected.length} selected</p>
+            </div>
+            <div className="grid-3">{filtered.map(item=><GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}</div>
+          </div>
+          <div style={{ padding:'1rem 1.25rem', overflowY:'auto' }}>
+            <p className="section-label">Selected</p>
+            {selectedItems.length===0 ? <p style={{ fontSize:12, color:'var(--text3)', marginBottom:12 }}>None selected.</p>
+              : <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:14 }}>
+                  {selectedItems.map(item=>(
+                    <div key={item.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
+                      <div style={{ width:30, height:38, borderRadius:'var(--radius)', overflow:'hidden', flexShrink:0, background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15 }}>
+                        {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : CAT_EMOJI[item.category]}
+                      </div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</p>
+                        <p style={{ fontSize:10, color:'var(--text2)' }}>{item.color} · {item.category}</p>
+                      </div>
+                      <button style={{ padding:'2px 6px', fontSize:11, border:'none', color:'var(--text3)' }} onClick={()=>toggle(item.id)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+            }
+            <div style={{ borderTop:'1px solid var(--border)', paddingTop:12 }}>
+              <div className="form-row">
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                  <label style={{ margin:0 }}>Occasion *</label>
+                  {apiKey && selectedItems.length>0 && <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>{aiLoading?<><span className="spinner"/>…</>:'✨ AI'}</button>}
+                </div>
+                <OccasionPicker selected={occasions} onChange={setOccasions} />
+                {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:4 }}>{aiError}</p>}
+              </div>
+              <div className="form-row">
+                <label>Label</label>
+                <input value={outfitName} onChange={e=>setOutfitName(e.target.value)} placeholder="e.g. Favourite date look" />
+              </div>
+              <div className="form-row">
+                <label>Notes</label>
+                <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Tips…" style={{ resize:'vertical', minHeight:48 }} />
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn-primary" style={{ flex:1, padding:'9px' }} onClick={submit} disabled={!canSave}>Save changes</button>
+                <button style={{ flex:1, padding:'9px' }} onClick={onClose}>Cancel</button>
+              </div>
+              {!canSave && <p style={{ fontSize:10, color:'var(--text3)', textAlign:'center', marginTop:5 }}>{selected.length<2?'Select ≥ 2 pieces':'Pick an occasion'}</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Outfits Tab ── */
+function OutfitsTab({ outfits, setOutfits, items }) {
+  const [search, setSearch] = useState('');
+  const [filterOcc, setFilterOcc] = useState('All');
+  const [editingOutfit, setEditingOutfit] = useState(null);
+  const saveEdit = updated => setOutfits(p=>p.map(o=>o.id===updated.id?updated:o));
+  const usedOccasions = useMemo(() => {
+    const all = outfits.flatMap(o=>o.occasions||[]);
+    return ['All', ...OUTFIT_OCCASIONS.filter(o=>all.includes(o))];
+  }, [outfits]);
+  const filtered = outfits.filter(o => {
+    if(search && ![o.name||'',o.notes||'',...(o.occasions||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
+    if(filterOcc!=='All' && !(o.occasions||[]).includes(filterOcc)) return false;
+    return true;
+  });
+  return (
+    <div className="content">
+      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} />}
+      {/* Toolbar */}
+      <div className="toolbar">
+        {usedOccasions.map(occ=>(
+          <button key={occ} className={`cat-chip${filterOcc===occ?' active':''}`} onClick={()=>setFilterOcc(occ)}>{occ}</button>
+        ))}
+        <div className="toolbar-divider" />
+        <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
+        <span style={{ fontSize:11, color:'var(--text3)', whiteSpace:'nowrap', flexShrink:0 }}>{filtered.length} outfit{filtered.length!==1?'s':''}</span>
+      </div>
+
+      <div className="outfits-content">
+        {filtered.length===0
+          ? <div className="empty-state">No outfits yet.<br/><span style={{fontSize:12}}>Build one in the Outfit Builder tab.</span></div>
+          : <div className="grid-2">
+              {filtered.map(outfit => {
+                const oi = items.filter(i=>outfit.itemIds.includes(i.id));
+                const cats = [...new Set(oi.map(i=>i.category))];
+                return (
+                  <div key={outfit.id} className="outfit-card">
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:6 }}>
+                          {(outfit.occasions||[]).map(occ=>(
+                            <span key={occ} style={{ fontSize:12, fontWeight:600, padding:'3px 10px', borderRadius:20, background:'var(--text)', color:'var(--bg)' }}>{occ}</span>
+                          ))}
+                        </div>
+                        <p style={{ fontSize:12, color:'var(--text2)' }}>{oi.length} pieces · {cats.join(', ')}</p>
+                        {outfit.name && outfit.name!==(outfit.occasions||[]).join(' · ') && (
+                          <p style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>{outfit.name}</p>
+                        )}
+                      </div>
+                      <div style={{ display:'flex', gap:5, flexShrink:0, marginLeft:8 }}>
+                        <button style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
+                        <button className="btn-danger" style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
+                      {oi.map(item=>(
+                        <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', paddingTop:8, borderTop:'1px solid var(--border)', fontStyle:'italic', lineHeight:1.6 }}>{outfit.notes}</p>}
+                  </div>
+                );
+              })}
+            </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ── App ── */
+function App() {
+  const [tab, setTab] = useState('wardrobe');
+  const [items, setItems] = useState(()=>loadState(STORAGE_KEY_ITEMS, SAMPLE_ITEMS));
+  const [outfits, setOutfits] = useState(()=>loadState(STORAGE_KEY_OUTFITS, SAMPLE_OUTFITS));
+  const [showSettings, setShowSettings] = useState(false);
+  const [hasKey, setHasKey] = useState(!!localStorage.getItem(STORAGE_KEY_APIKEY));
+  const [hasCloud, setHasCloud] = useState(()=>{ try { const c=JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); return !!(c.cloudName&&c.uploadPreset); } catch { return false; } });
+
+  useEffect(()=>{ try { localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(items)); } catch {} }, [items]);
+  useEffect(()=>{ try { localStorage.setItem(STORAGE_KEY_OUTFITS, JSON.stringify(outfits)); } catch {} }, [outfits]);
+
+  const onSettingsClose = () => {
+    setShowSettings(false);
+    setHasKey(!!localStorage.getItem(STORAGE_KEY_APIKEY));
+    try { const c=JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); setHasCloud(!!(c.cloudName&&c.uploadPreset)); } catch {}
+  };
+
+  const TABS = [
+    { id:'wardrobe', label:'Wardrobe' },
+    { id:'builder',  label:'Builder' },
+    { id:'outfits',  label:'Outfits' },
+  ];
+
+  return (
+    <div style={{ background:'var(--bg)', minHeight:'100vh', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>
+      {showSettings && <SettingsModal onClose={onSettingsClose} />}
+
+      {/* Top nav */}
+      <div className="top-nav">
+        <div className="nav-tabs">
+          {TABS.map(t => (
+            <button key={t.id} className={`nav-tab${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <button className="settings-btn" onClick={()=>setShowSettings(true)}>
+          ⚙
+          {hasCloud && <span className="settings-badge" style={{ color:'#39a855' }}>CDN</span>}
+          {hasKey   && <span className="settings-badge" style={{ color:'var(--accent)' }}>AI</span>}
+        </button>
+      </div>
+
+      {/* Banners (only if nothing set up) */}
+      {(!hasCloud || !hasKey) && (
+        <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+          {!hasCloud && (
+            <div style={{ padding:'9px 1.25rem', background:'#fffaed', fontSize:11, color:'#7a5200', borderBottom:'1px solid #f0d97a', cursor:'pointer', lineHeight:1.6 }} onClick={()=>setShowSettings(true)}>
+              ☁ <strong>Connect Cloudinary</strong> for photo storage across devices.
+            </div>
+          )}
+          {!hasKey && (
+            <div style={{ padding:'9px 1.25rem', background:'var(--accent-bg)', fontSize:11, color:'var(--accent)', borderBottom:'1px solid rgba(80,96,240,0.25)', cursor:'pointer', lineHeight:1.6 }} onClick={()=>setShowSettings(true)}>
+              ✨ <strong>Enable AI auto-fill</strong> — add your Anthropic API key in Settings.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab content */}
+      {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} />}
+      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
