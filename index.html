@@ -416,6 +416,18 @@ const { useState, useMemo, useEffect, useRef } = React;
 
 const CATEGORIES = ['Top','Bottom','Shoes','Outerwear','Accessory','Dress','Other'];
 const CAT_EMOJI  = { Top:'👕', Bottom:'👖', Shoes:'👟', Outerwear:'🧥', Dress:'👗', Accessory:'💍', Other:'👔' };
+const COLOR_DICT = [
+  'White','Off-White','Cream','Light Gray','Gray','Charcoal','Black',
+  'Beige','Tan','Camel','Brown','Chocolate',
+  'Blush','Rose','Red','Burgundy','Rust',
+  'Coral','Orange','Mustard','Yellow',
+  'Olive','Sage','Green','Forest Green',
+  'Baby Blue','Sky Blue','Blue','Navy','Royal Blue',
+  'Lavender','Lilac','Purple','Plum',
+  'Pink','Hot Pink',
+  'Gold','Silver',
+  'Denim','Multicolor','Print','Pattern'
+];
 const OUTFIT_OCCASIONS = [
   'Casual Day','Weekend','Brunch','Work','Smart Casual','Date Night',
   'Party','Night Out','Travel','Beach','Summer','Winter','Formal',
@@ -467,7 +479,7 @@ async function analyzeClothingImage(photoUrl, apiKey) {
     headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
     body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:300, messages:[{ role:'user', content:[
       { type:'image', source:imageSource },
-      { type:'text', text:`Analyze this clothing item. Reply ONLY with a valid JSON object, no markdown:\n{"name":"short descriptive name","category":"one of: Top Bottom Shoes Outerwear Accessory Dress Other","color":"primary color","tags":["2 to 4 tags from: casual formal smart-casual summer winter autumn spring minimal feminine streetwear athletic bohemian vintage crop oversized fitted knit denim leather floral printed versatile"]}` }
+      { type:'text', text:`Analyze this clothing item. Reply ONLY with a valid JSON object, no markdown:\n{"name":"short descriptive name","category":"one of: Top Bottom Shoes Outerwear Accessory Dress Other","color":"pick the single closest color from this list: ${COLOR_DICT.join(', ')}","tags":["2 to 4 tags from: casual formal smart-casual summer winter autumn spring minimal feminine streetwear athletic bohemian vintage crop oversized fitted knit denim leather floral printed versatile"]}` }
     ]}]})
   });
   if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
@@ -518,9 +530,22 @@ function OccasionPicker({ selected, onChange }) {
   );
 }
 
+const COLOR_SWATCH = {
+  'White':'#f5f5f5','Off-White':'#ede8dc','Cream':'#f5f0e0','Light Gray':'#c8c8c8','Gray':'#909090','Charcoal':'#555552','Black':'#1a1a1a',
+  'Beige':'#d4b896','Tan':'#c49a6c','Camel':'#c19a6b','Brown':'#8B5E3C','Chocolate':'#5c3317',
+  'Blush':'#f4b8c1','Rose':'#e8758a','Red':'#E24B4A','Burgundy':'#7f1d2e','Rust':'#c05a2a',
+  'Coral':'#e86f5a','Orange':'#D85A30','Mustard':'#d4a017','Yellow':'#EFC227',
+  'Olive':'#6b6b3a','Sage':'#8fab8a','Green':'#4a8c3f','Forest Green':'#2d5a27',
+  'Baby Blue':'#a8cde8','Sky Blue':'#72b8e0','Blue':'#378ADD','Navy':'#1e3a5f','Royal Blue':'#3a50c4',
+  'Lavender':'#c5b8e8','Lilac':'#b89fd4','Purple':'#7F77DD','Plum':'#5b2d6e',
+  'Pink':'#D4537E','Hot Pink':'#e8267a',
+  'Gold':'#c8a840','Silver':'#b0b0b0',
+  'Denim':'#4a6fa5','Multicolor':'linear-gradient(135deg,#f00,#ff0,#0f0,#00f)','Print':'#c0a0c0','Pattern':'#a0c0a0'
+};
 function colorDot(c) {
-  const map = { White:'#f0f0f0', Black:'#1a1a1a', Navy:'#1e3a5f', Beige:'#d4b896', Indigo:'#3c4f7c', Blue:'#378ADD', Red:'#E24B4A', Green:'#639922', Pink:'#D4537E', Brown:'#8B5E3C', Grey:'#888780', Gray:'#888780', Yellow:'#EF9F27', Orange:'#D85A30', Purple:'#7F77DD' };
-  return <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%', background:map[c]||'#b0b0b0', border:'1px solid var(--border2)', marginRight:5, verticalAlign:'middle', flexShrink:0 }} />;
+  const bg = COLOR_SWATCH[c] || '#b0b0b0';
+  const style = bg.startsWith('linear') ? { background: bg } : { background: bg };
+  return <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%', ...style, border:'1px solid var(--border2)', marginRight:5, verticalAlign:'middle', flexShrink:0 }} />;
 }
 
 /* ── Login Screen ── */
@@ -799,7 +824,12 @@ function ItemModal({ item, onSave, onClose, currentUser }) {
           <div className="form-row" style={{ marginBottom:0 }}><label>Category</label>
             <select value={form.category} onChange={e=>set('category',e.target.value)}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select>
           </div>
-          <div className="form-row" style={{ marginBottom:0 }}><label>Color</label><input value={form.color} onChange={e=>set('color',e.target.value)} placeholder="e.g. Blue" /></div>
+          <div className="form-row" style={{ marginBottom:0 }}><label>Color</label>
+            <select value={form.color} onChange={e=>set('color',e.target.value)}>
+              <option value="">Select color…</option>
+              {COLOR_DICT.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
         </div>
         <div className="grid-2" style={{ marginBottom:12 }}>
           <div className="form-row" style={{ marginBottom:0 }}><label>Brand</label><input value={form.brand} onChange={e=>set('brand',e.target.value)} placeholder="e.g. Zara" /></div>
