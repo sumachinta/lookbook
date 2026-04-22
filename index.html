@@ -366,10 +366,9 @@ const OUTFIT_OCCASIONS = [
   'Party','Night Out','Travel','Beach','Summer','Winter','Formal',
   'Wedding Guest','Festival','Gym'
 ];
-const STORAGE_KEY_ITEMS      = 'outfitguide_items';
-const STORAGE_KEY_OUTFITS    = 'outfitguide_outfits';
-const STORAGE_KEY_APIKEY     = 'outfitguide_apikey';
-const STORAGE_KEY_CLOUDINARY = 'outfitguide_cloudinary';
+const STORAGE_KEY_USERS = 'outfitguide_users';
+const SK_CURRENT_USER   = 'outfitguide_currentUser'; // sessionStorage
+function storageKey(type, username) { return `outfitguide_${type}_${username}`; }
 
 const SAMPLE_ITEMS = [
   { id:1, name:'White linen shirt',     category:'Top',       color:'White',      brand:'Uniqlo', cost:29, tags:['casual','summer'],         photo:'', purchaseLink:'' },
@@ -388,6 +387,11 @@ const SAMPLE_OUTFITS = [
 
 function loadState(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+
+async function hashPassword(password) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
 async function uploadToCloudinary(file, cloudName, uploadPreset) {
@@ -464,17 +468,101 @@ function colorDot(c) {
   return <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%', background:map[c]||'#b0b0b0', border:'1px solid var(--border2)', marginRight:5, verticalAlign:'middle', flexShrink:0 }} />;
 }
 
+/* ── Login Screen ── */
+function LoginScreen({ onLogin }) {
+  const [mode, setMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setError(''); setLoading(true);
+    try {
+      const uname = username.trim().toLowerCase();
+      if (!uname) { setError('Username is required.'); setLoading(false); return; }
+      if (!password) { setError('Password is required.'); setLoading(false); return; }
+      const users = loadState(STORAGE_KEY_USERS, []);
+      if (mode === 'login') {
+        const user = users.find(u => u.username === uname);
+        if (!user) { setError('Username not found.'); setLoading(false); return; }
+        const hash = await hashPassword(password);
+        if (hash !== user.passwordHash) { setError('Incorrect password.'); setLoading(false); return; }
+        sessionStorage.setItem(SK_CURRENT_USER, uname);
+        onLogin(uname);
+      } else {
+        if (password.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
+        if (password !== confirm) { setError('Passwords do not match.'); setLoading(false); return; }
+        if (users.find(u => u.username === uname)) { setError('Username already taken.'); setLoading(false); return; }
+        const passwordHash = await hashPassword(password);
+        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify([...users, { username: uname, passwordHash, createdAt: Date.now() }]));
+        localStorage.setItem(storageKey('items', uname), JSON.stringify(SAMPLE_ITEMS));
+        localStorage.setItem(storageKey('outfits', uname), JSON.stringify(SAMPLE_OUTFITS));
+        sessionStorage.setItem(SK_CURRENT_USER, uname);
+        onLogin(uname);
+      }
+    } catch(e) { setError('Something went wrong. Please try again.'); }
+    setLoading(false);
+  };
+
+  const onKey = e => { if (e.key === 'Enter') submit(); };
+
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg3)', fontFamily:"'Jost', sans-serif" }}>
+      <div style={{ background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:'var(--radius-lg)', padding:'2.5rem 2rem', width:340, boxShadow:'0 30px 90px rgba(0,0,0,0.15)', animation:'slideUp 0.2s ease' }}>
+        <p style={{ fontSize:20, fontWeight:600, marginBottom:2, letterSpacing:'-0.02em' }}>Lookbook</p>
+        <p style={{ fontSize:12, color:'var(--text3)', marginBottom:'1.75rem' }}>Your personal wardrobe guide</p>
+        <div style={{ display:'flex', marginBottom:'1.5rem', borderBottom:'1px solid var(--border)' }}>
+          {[['login','Sign in'],['register','Create account']].map(([m,label]) => (
+            <button key={m} onClick={()=>{ setMode(m); setError(''); }} style={{
+              flex:1, border:'none', borderRadius:0, background:'transparent',
+              color: mode===m ? 'var(--text)' : 'var(--text3)',
+              fontWeight: mode===m ? 600 : 400,
+              borderBottom: mode===m ? '2px solid var(--text)' : '2px solid transparent',
+              padding:'8px 0', fontSize:13, letterSpacing:'0.02em', marginBottom:-1
+            }}>{label}</button>
+          ))}
+        </div>
+        <div className="form-row">
+          <label>Username</label>
+          <input value={username} onChange={e=>setUsername(e.target.value)} onKeyDown={onKey} placeholder="your username" autoFocus />
+        </div>
+        <div className="form-row">
+          <label>Password</label>
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={onKey} placeholder="••••••" />
+        </div>
+        {mode === 'register' && (
+          <div className="form-row">
+            <label>Confirm password</label>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={onKey} placeholder="••••••" />
+          </div>
+        )}
+        {error && <p style={{ fontSize:12, color:'#c00', marginBottom:10, lineHeight:1.5 }}>{error}</p>}
+        <button className="btn-primary" style={{ width:'100%', padding:'10px', marginTop:4 }} onClick={submit} disabled={loading||!username.trim()||!password}>
+          {loading ? <><span className="spinner" style={{ borderColor:'var(--bg)', borderTopColor:'transparent' }}/>…</> : mode==='login' ? 'Sign in' : 'Create account'}
+        </button>
+        {mode === 'register' && (
+          <p style={{ fontSize:11, color:'var(--text3)', marginTop:12, lineHeight:1.6, textAlign:'center' }}>
+            A sample wardrobe will be added to help you get started.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Settings Modal ── */
-function SettingsModal({ onClose }) {
-  const [key, setKey] = useState(() => localStorage.getItem(STORAGE_KEY_APIKEY)||'');
+function SettingsModal({ onClose, currentUser }) {
+  const [key, setKey] = useState(() => localStorage.getItem(storageKey('apikey', currentUser))||'');
   const [saved, setSaved] = useState(false);
-  const loadCloud = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); } catch { return {}; } };
+  const loadCloud = () => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } };
   const [cloudName, setCloudName] = useState(()=>loadCloud().cloudName||'');
   const [uploadPreset, setUploadPreset] = useState(()=>loadCloud().uploadPreset||'');
   const [cloudSaved, setCloudSaved] = useState(false);
-  const saveApiKey = () => { localStorage.setItem(STORAGE_KEY_APIKEY, key.trim()); setSaved(true); setTimeout(()=>setSaved(false),1500); };
+  const saveApiKey = () => { localStorage.setItem(storageKey('apikey', currentUser), key.trim()); setSaved(true); setTimeout(()=>setSaved(false),1500); };
   const saveCloudinary = () => {
-    localStorage.setItem(STORAGE_KEY_CLOUDINARY, JSON.stringify({ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() }));
+    localStorage.setItem(storageKey('cloudinary', currentUser), JSON.stringify({ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() }));
     setCloudSaved(true); setTimeout(()=>{ setCloudSaved(false); onClose(); }, 900);
   };
   return (
@@ -493,7 +581,7 @@ function SettingsModal({ onClose }) {
           <div className="form-row"><label>Upload preset (unsigned)</label><input value={uploadPreset} onChange={e=>setUploadPreset(e.target.value)} placeholder="e.g. outfit_unsigned" /></div>
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn-primary" style={{ flex:1 }} onClick={saveCloudinary} disabled={!cloudName.trim()||!uploadPreset.trim()}>{cloudSaved?'✓ Saved!':'Save Cloudinary'}</button>
-            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(STORAGE_KEY_CLOUDINARY); setCloudName(''); setUploadPreset(''); }}>Remove</button>}
+            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(storageKey('cloudinary', currentUser)); setCloudName(''); setUploadPreset(''); }}>Remove</button>}
           </div>
         </div>
         <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'0 0 18px' }} />
@@ -506,7 +594,7 @@ function SettingsModal({ onClose }) {
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn-primary" style={{ flex:1 }} onClick={saveApiKey}>{saved?'✓ Saved!':'Save API key'}</button>
-            {key && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(STORAGE_KEY_APIKEY); setKey(''); }}>Remove</button>}
+            {key && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(storageKey('apikey', currentUser)); setKey(''); }}>Remove</button>}
           </div>
         </div>
       </div>
@@ -568,7 +656,7 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete }) {
 }
 
 /* ── Item Add/Edit Modal ── */
-function ItemModal({ item, onSave, onClose }) {
+function ItemModal({ item, onSave, onClose, currentUser }) {
   const init = item || { name:'', category:'Top', color:'', brand:'', cost:'', tags:'', photo:'', purchaseLink:'' };
   const [form, setForm] = useState({ ...init, tags:Array.isArray(init.tags)?init.tags.join(', '):init.tags, cost:init.cost||'' });
   const [uploading, setUploading] = useState(false);
@@ -578,8 +666,8 @@ function ItemModal({ item, onSave, onClose }) {
   const [aiError, setAiError] = useState('');
   const [aiDone, setAiDone] = useState(false);
   const fileRef = useRef();
-  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
-  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); } catch { return {}; } })();
+  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
+  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
   const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
@@ -693,7 +781,7 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
 }
 
 /* ── Wardrobe Tab ── */
-function WardrobeTab({ items, setItems }) {
+function WardrobeTab({ items, setItems, currentUser }) {
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
@@ -722,7 +810,7 @@ function WardrobeTab({ items, setItems }) {
 
   return (
     <div className="content">
-      {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} />}
+      {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} currentUser={currentUser} />}
       {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} />}
 
       {/* Toolbar */}
@@ -771,7 +859,7 @@ function WardrobeTab({ items, setItems }) {
 }
 
 /* ── Builder Tab ── */
-function BuilderTab({ items, setOutfits }) {
+function BuilderTab({ items, setOutfits, currentUser }) {
   const [selected, setSelected] = useState([]);
   const [occasions, setOccasions] = useState([]);
   const [outfitName, setOutfitName] = useState('');
@@ -780,7 +868,7 @@ function BuilderTab({ items, setOutfits }) {
   const [saved, setSaved] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
+  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
   const toggle = id => setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
   const filtered = filterCat==='All' ? items : items.filter(i=>i.category===filterCat);
   const grouped = filterCat==='All'
@@ -897,7 +985,7 @@ function BuilderTab({ items, setOutfits }) {
 }
 
 /* ── Edit Outfit Modal ── */
-function EditOutfitModal({ outfit, items, onSave, onClose }) {
+function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
   const [selected, setSelected] = useState(outfit.itemIds||[]);
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [outfitName, setOutfitName] = useState(outfit.name||'');
@@ -905,7 +993,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose }) {
   const [filterCat, setFilterCat] = useState('All');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const apiKey = localStorage.getItem(STORAGE_KEY_APIKEY)||'';
+  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
   const toggle = id => setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const filtered = filterCat==='All'?items:items.filter(i=>i.category===filterCat);
   const selectedItems = items.filter(i=>selected.includes(i.id));
@@ -990,7 +1078,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose }) {
 }
 
 /* ── Outfits Tab ── */
-function OutfitsTab({ outfits, setOutfits, items }) {
+function OutfitsTab({ outfits, setOutfits, items, currentUser }) {
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
@@ -1006,7 +1094,7 @@ function OutfitsTab({ outfits, setOutfits, items }) {
   });
   return (
     <div className="content">
-      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} />}
+      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} currentUser={currentUser} />}
       {/* Toolbar */}
       <div className="toolbar">
         {usedOccasions.map(occ=>(
@@ -1061,22 +1149,22 @@ function OutfitsTab({ outfits, setOutfits, items }) {
   );
 }
 
-/* ── App ── */
-function App() {
+/* ── Main App (mounted after login) ── */
+function MainApp({ currentUser, onLogout }) {
   const [tab, setTab] = useState('wardrobe');
-  const [items, setItems] = useState(()=>loadState(STORAGE_KEY_ITEMS, SAMPLE_ITEMS));
-  const [outfits, setOutfits] = useState(()=>loadState(STORAGE_KEY_OUTFITS, SAMPLE_OUTFITS));
+  const [items, setItems] = useState(()=>loadState(storageKey('items', currentUser), SAMPLE_ITEMS));
+  const [outfits, setOutfits] = useState(()=>loadState(storageKey('outfits', currentUser), SAMPLE_OUTFITS));
   const [showSettings, setShowSettings] = useState(false);
-  const [hasKey, setHasKey] = useState(!!localStorage.getItem(STORAGE_KEY_APIKEY));
-  const [hasCloud, setHasCloud] = useState(()=>{ try { const c=JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); return !!(c.cloudName&&c.uploadPreset); } catch { return false; } });
+  const [hasKey, setHasKey] = useState(()=>!!localStorage.getItem(storageKey('apikey', currentUser)));
+  const [hasCloud, setHasCloud] = useState(()=>{ try { const c=JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); return !!(c.cloudName&&c.uploadPreset); } catch { return false; } });
 
-  useEffect(()=>{ try { localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(items)); } catch {} }, [items]);
-  useEffect(()=>{ try { localStorage.setItem(STORAGE_KEY_OUTFITS, JSON.stringify(outfits)); } catch {} }, [outfits]);
+  useEffect(()=>{ try { localStorage.setItem(storageKey('items', currentUser), JSON.stringify(items)); } catch {} }, [items]);
+  useEffect(()=>{ try { localStorage.setItem(storageKey('outfits', currentUser), JSON.stringify(outfits)); } catch {} }, [outfits]);
 
   const onSettingsClose = () => {
     setShowSettings(false);
-    setHasKey(!!localStorage.getItem(STORAGE_KEY_APIKEY));
-    try { const c=JSON.parse(localStorage.getItem(STORAGE_KEY_CLOUDINARY)||'{}'); setHasCloud(!!(c.cloudName&&c.uploadPreset)); } catch {}
+    setHasKey(!!localStorage.getItem(storageKey('apikey', currentUser)));
+    try { const c=JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); setHasCloud(!!(c.cloudName&&c.uploadPreset)); } catch {}
   };
 
   const TABS = [
@@ -1087,7 +1175,7 @@ function App() {
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>
-      {showSettings && <SettingsModal onClose={onSettingsClose} />}
+      {showSettings && <SettingsModal onClose={onSettingsClose} currentUser={currentUser} />}
 
       {/* Top nav */}
       <div className="top-nav">
@@ -1098,11 +1186,15 @@ function App() {
             </button>
           ))}
         </div>
-        <button className="settings-btn" onClick={()=>setShowSettings(true)}>
-          ⚙
-          {hasCloud && <span className="settings-badge" style={{ color:'#39a855' }}>CDN</span>}
-          {hasKey   && <span className="settings-badge" style={{ color:'var(--accent)' }}>AI</span>}
-        </button>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:11, color:'var(--text3)', letterSpacing:'0.02em' }}>{currentUser}</span>
+          <button className="settings-btn" onClick={()=>setShowSettings(true)}>
+            ⚙
+            {hasCloud && <span className="settings-badge" style={{ color:'#39a855' }}>CDN</span>}
+            {hasKey   && <span className="settings-badge" style={{ color:'var(--accent)' }}>AI</span>}
+          </button>
+          <button style={{ padding:'4px 10px', fontSize:11, color:'var(--text3)', border:'1px solid var(--border2)', borderRadius:'var(--radius)' }} onClick={onLogout}>Sign out</button>
+        </div>
       </div>
 
       {/* Banners (only if nothing set up) */}
@@ -1122,11 +1214,27 @@ function App() {
       )}
 
       {/* Tab content */}
-      {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} />}
-      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} />}
-      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} />}
+      {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} currentUser={currentUser} />}
+      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} currentUser={currentUser} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} currentUser={currentUser} />}
     </div>
   );
+}
+
+/* ── App Shell ── */
+function App() {
+  const [currentUser, setCurrentUser] = useState(() => sessionStorage.getItem(SK_CURRENT_USER));
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(SK_CURRENT_USER);
+    setCurrentUser(null);
+  };
+
+  if (!currentUser) {
+    return <LoginScreen onLogin={u => setCurrentUser(u)} />;
+  }
+
+  return <MainApp key={currentUser} currentUser={currentUser} onLogout={handleLogout} />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
