@@ -237,6 +237,36 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
   border-radius: var(--radius);
 }
 .add-btn:hover { opacity: 0.85; background: var(--text); }
+.add-multi-btn {
+  flex-shrink: 0; padding: 5px 13px;
+  font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--text2);
+}
+.add-multi-btn:hover { background: var(--bg2); color: var(--text); }
+
+/* Bulk upload modal */
+.bulk-drop-zone {
+  border: 2px dashed var(--border2); border-radius: var(--radius-lg);
+  padding: 2rem 1rem; text-align: center; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  color: var(--text3); font-size: 13px; line-height: 2;
+}
+.bulk-drop-zone.drag-over { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.bulk-preview-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px;
+  max-height: 280px; overflow-y: auto; margin-top: 12px;
+}
+.bulk-thumb {
+  aspect-ratio: 3/4; border-radius: var(--radius); overflow: hidden;
+  background: var(--bg2); position: relative; border: 1px solid var(--border);
+}
+.bulk-thumb img { width:100%; height:100%; object-fit:cover; }
+.bulk-thumb-status {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; font-weight: 600;
+  background: rgba(0,0,0,0.5); color: #fff; text-align: center; padding: 4px;
+}
 
 /* ── Photo grid ── */
 .photo-grid {
@@ -875,12 +905,127 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
   );
 }
 
+/* ── Bulk Upload Modal ── */
+function BulkUploadModal({ onClose, onSave, currentUser }) {
+  const [files, setFiles] = useState([]); // [{file, preview, status, name}]
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef();
+  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
+  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
+  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
+
+  const addFiles = async (fileList) => {
+    const images = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    const newEntries = await Promise.all(images.map(async f => {
+      const preview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(f); });
+      return { file: f, preview, status: 'pending', name: '' };
+    }));
+    setFiles(p => [...p, ...newEntries]);
+  };
+
+  const onDrop = e => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); };
+  const onDragOver = e => { e.preventDefault(); setDragOver(true); };
+  const onDragLeave = () => setDragOver(false);
+
+  const uploadAll = async () => {
+    if (!files.length) return;
+    setUploading(true);
+    const results = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (f.status === 'done') { results.push(null); continue; }
+      setFiles(p => p.map((x,j) => j===i ? { ...x, status:'uploading' } : x));
+      try {
+        let photoUrl = f.preview;
+        if (cloudinaryReady) {
+          photoUrl = await uploadToCloudinary(f.file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+        }
+        let meta = { name: f.file.name.replace(/\.[^.]+$/,''), category:'Other', color:'', tags:[] };
+        if (apiKey) {
+          try { meta = await analyzeClothingImage(photoUrl, apiKey); } catch {}
+        }
+        const item = { id: Date.now() + i, name: meta.name||f.file.name, category: CATEGORIES.includes(meta.category)?meta.category:'Other', color: meta.color||'', tags: Array.isArray(meta.tags)?meta.tags:[], brand:'', cost:null, photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
+        results.push(item);
+        setFiles(p => p.map((x,j) => j===i ? { ...x, status:'done', name:item.name } : x));
+      } catch(err) {
+        results.push(null);
+        setFiles(p => p.map((x,j) => j===i ? { ...x, status:'error' } : x));
+      }
+    }
+    const saved = results.filter(Boolean);
+    if (saved.length) onSave(saved);
+    setUploading(false);
+    if (saved.length === files.length || files.every(f=>f.status==='done'||f.status==='error')) {
+      setTimeout(onClose, 800);
+    }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width:480 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem' }}>
+          <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>Add multiple items</p>
+          <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
+        </div>
+
+        {!cloudinaryReady && (
+          <div className="ai-banner" style={{ marginBottom:12 }}>⚠ Cloudinary not set up — photos will be saved locally only.</div>
+        )}
+        {!apiKey && (
+          <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10, lineHeight:1.6 }}>No API key set — items will be saved without AI analysis. Add your key in Settings.</div>
+        )}
+
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={e=>addFiles(e.target.files)} />
+
+        <div
+          className={`bulk-drop-zone${dragOver?' drag-over':''}`}
+          onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
+          onClick={()=>!uploading&&fileRef.current.click()}
+        >
+          <div style={{ fontSize:28, marginBottom:4 }}>📁</div>
+          Drop photos here or click to select
+          <br/>
+          <span style={{ fontSize:11 }}>Select multiple images at once</span>
+        </div>
+
+        {files.length > 0 && (
+          <>
+            <div className="bulk-preview-grid">
+              {files.map((f,i) => (
+                <div key={i} className="bulk-thumb">
+                  <img src={f.preview} alt="" />
+                  {f.status === 'uploading' && <div className="bulk-thumb-status"><span className="spinner" style={{ borderColor:'#fff', borderTopColor:'transparent' }}/></div>}
+                  {f.status === 'done'      && <div className="bulk-thumb-status" style={{ background:'rgba(30,160,60,0.7)' }}>✓</div>}
+                  {f.status === 'error'     && <div className="bulk-thumb-status" style={{ background:'rgba(180,30,30,0.75)' }}>✕</div>}
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize:11, color:'var(--text3)', marginTop:8, textAlign:'center' }}>
+              {files.filter(f=>f.status==='done').length} / {files.length} done
+              {files.some(f=>f.status==='error') ? ` · ${files.filter(f=>f.status==='error').length} failed` : ''}
+            </p>
+          </>
+        )}
+
+        <div style={{ display:'flex', gap:8, marginTop:'1.25rem' }}>
+          <button className="btn-primary" style={{ flex:1, padding:'10px' }} onClick={uploadAll} disabled={!files.length||uploading}>
+            {uploading ? <><span className="spinner" style={{ borderColor:'var(--bg)', borderTopColor:'transparent' }}/>Uploading…</> : `Upload ${files.length} photo${files.length!==1?'s':''}`}
+          </button>
+          <button style={{ flex:1 }} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Wardrobe Tab ── */
 function WardrobeTab({ items, setItems, currentUser }) {
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
+  const [showBulk, setShowBulk] = useState(false);
 
   // All items that pass the active filter / search
   const filtered = useMemo(() => items.filter(i => {
@@ -906,6 +1051,7 @@ function WardrobeTab({ items, setItems, currentUser }) {
   return (
     <div className="content">
       {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} currentUser={currentUser} />}
+      {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={items=>setItems(p=>[...p,...items])} currentUser={currentUser} />}
       {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} />}
 
       {/* Toolbar */}
@@ -916,6 +1062,7 @@ function WardrobeTab({ items, setItems, currentUser }) {
         ))}
         <div className="toolbar-divider" />
         <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
+        <button className="add-multi-btn" onClick={()=>setShowBulk(true)}>+ Add multiple</button>
         <button className="add-btn" onClick={()=>setModal('add')}>+ Add</button>
       </div>
 
