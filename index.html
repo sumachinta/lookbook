@@ -438,18 +438,18 @@ const SK_CURRENT_USER   = 'outfitguide_currentUser'; // sessionStorage
 function storageKey(type, username) { return `outfitguide_${type}_${username}`; }
 
 const SAMPLE_ITEMS = [
-  { id:1, name:'White linen shirt',     category:'Top',       color:'White',      brand:'Uniqlo', cost:29, tags:['casual','summer'],         photo:'', purchaseLink:'' },
-  { id:2, name:'Slim navy chinos',       category:'Bottom',    color:'Navy',       brand:'Gap',    cost:55, tags:['smart-casual','versatile'],photo:'', purchaseLink:'' },
-  { id:3, name:'Black ankle boots',      category:'Shoes',     color:'Black',      brand:'Zara',   cost:89, tags:['winter','formal'],          photo:'', purchaseLink:'' },
-  { id:4, name:'Oversized beige blazer', category:'Outerwear', color:'Beige',      brand:'H&M',    cost:70, tags:['smart-casual','autumn'],    photo:'', purchaseLink:'' },
-  { id:5, name:'White sneakers',         category:'Shoes',     color:'White',      brand:'Adidas', cost:80, tags:['casual','summer'],          photo:'', purchaseLink:'' },
-  { id:6, name:'Black turtleneck',       category:'Top',       color:'Black',      brand:'COS',    cost:45, tags:['winter','minimal'],         photo:'', purchaseLink:'' },
-  { id:7, name:'Midi floral dress',      category:'Dress',     color:'Multicolor', brand:'Mango',  cost:60, tags:['summer','feminine'],        photo:'', purchaseLink:'' },
-  { id:8, name:'Dark wash jeans',        category:'Bottom',    color:'Indigo',     brand:"Levi's", cost:75, tags:['casual','versatile'],       photo:'', purchaseLink:'' },
+  { id:1, name:'White linen shirt',     category:'Top',       color:'White',      brand:'Uniqlo', cost:29, tags:['casual','summer'],         photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:2, name:'Slim navy chinos',       category:'Bottom',    color:'Navy',       brand:'Gap',    cost:55, tags:['smart-casual','versatile'],photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:3, name:'Black ankle boots',      category:'Shoes',     color:'Black',      brand:'Zara',   cost:89, tags:['winter','formal'],          photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:4, name:'Oversized beige blazer', category:'Outerwear', color:'Beige',      brand:'H&M',    cost:70, tags:['smart-casual','autumn'],    photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:5, name:'White sneakers',         category:'Shoes',     color:'White',      brand:'Adidas', cost:80, tags:['casual','summer'],          photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:6, name:'Black turtleneck',       category:'Top',       color:'Black',      brand:'COS',    cost:45, tags:['winter','minimal'],         photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:7, name:'Midi floral dress',      category:'Dress',     color:'Multicolor', brand:'Mango',  cost:60, tags:['summer','feminine'],        photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
+  { id:8, name:'Dark wash jeans',        category:'Bottom',    color:'Denim',      brand:"Levi's", cost:75, tags:['casual','versatile'],       photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
 ];
 const SAMPLE_OUTFITS = [
-  { id:1, name:'Smart casual friday', itemIds:[1,2,4,5], occasions:['Smart Casual','Work'], notes:'Great for office-casual days' },
-  { id:2, name:'Winter editorial',    itemIds:[6,8,3,4], occasions:['Winter','Date Night'],  notes:'Monochrome with blazer layering' },
+  { id:1, name:'Smart casual friday', itemIds:[1,2,4,5], occasions:['Smart Casual','Work'], notes:'Great for office-casual days', wornCount:0, lastWorn:null },
+  { id:2, name:'Winter editorial',    itemIds:[6,8,3,4], occasions:['Winter','Date Night'],  notes:'Monochrome with blazer layering', wornCount:0, lastWorn:null },
 ];
 
 function loadState(key, fallback) {
@@ -723,6 +723,11 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete }) {
                   🛍 Shop link
                 </a>
               )}
+              {(item.wornCount > 0) && (
+                <div style={{ marginTop:14, fontSize:11, color:'var(--text3)', lineHeight:1.8 }}>
+                  Worn {item.wornCount} time{item.wornCount!==1?'s':''}{item.lastWorn ? ` · Last worn ${new Date(item.lastWorn).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}` : ''}
+                </div>
+              )}
             </div>
           </div>
           <div className="detail-actions">
@@ -861,6 +866,11 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
         {CAT_EMOJI[item.category]||'👔'}
       </div>
       <div className={`grid-cat-dot dot-${item.category}`} />
+      {item.wornCount > 0 && (
+        <div style={{ position:'absolute', bottom:6, right:6, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', lineHeight:1.6, letterSpacing:'0.02em' }}>
+          ×{item.wornCount}
+        </div>
+      )}
     </div>
   );
 }
@@ -1170,11 +1180,17 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
 }
 
 /* ── Outfits Tab ── */
-function OutfitsTab({ outfits, setOutfits, items, currentUser }) {
+function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser }) {
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
   const saveEdit = updated => setOutfits(p=>p.map(o=>o.id===updated.id?updated:o));
+
+  const logWear = (outfit) => {
+    const now = new Date().toISOString();
+    setOutfits(p => p.map(o => o.id===outfit.id ? { ...o, wornCount:(o.wornCount||0)+1, lastWorn:now } : o));
+    setItems(p => p.map(i => outfit.itemIds.includes(i.id) ? { ...i, wornCount:(i.wornCount||0)+1, lastWorn:now } : i));
+  };
   const usedOccasions = useMemo(() => {
     const all = outfits.flatMap(o=>o.occasions||[]);
     return ['All', ...OUTFIT_OCCASIONS.filter(o=>all.includes(o))];
@@ -1217,8 +1233,12 @@ function OutfitsTab({ outfits, setOutfits, items, currentUser }) {
                         {outfit.name && outfit.name!==(outfit.occasions||[]).join(' · ') && (
                           <p style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>{outfit.name}</p>
                         )}
+                        {(outfit.wornCount > 0) && (
+                          <p style={{ fontSize:10, color:'var(--text3)', marginTop:3 }}>Worn {outfit.wornCount}×{outfit.lastWorn ? ` · ${new Date(outfit.lastWorn).toLocaleDateString(undefined,{month:'short',day:'numeric'})}` : ''}</p>
+                        )}
                       </div>
-                      <div style={{ display:'flex', gap:5, flexShrink:0, marginLeft:8 }}>
+                      <div style={{ display:'flex', gap:5, flexShrink:0, marginLeft:8, alignItems:'center' }}>
+                        <button title="Log as worn today" style={{ padding:'3px 10px', fontSize:13, fontWeight:600, background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:'var(--radius)' }} onClick={()=>logWear(outfit)}>+</button>
                         <button style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
                         <button className="btn-danger" style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
                       </div>
@@ -1308,7 +1328,7 @@ function MainApp({ currentUser, onLogout }) {
       {/* Tab content */}
       {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} currentUser={currentUser} />}
       {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} currentUser={currentUser} />}
-      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} currentUser={currentUser} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} setItems={setItems} currentUser={currentUser} />}
     </div>
   );
 }
