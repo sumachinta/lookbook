@@ -458,6 +458,21 @@ const COLOR_DICT = [
   'Gold','Silver',
   'Denim','Multicolor','Print','Pattern'
 ];
+const COLOR_ORDER = [
+  'White','Off-White','Cream','Beige',
+  'Tan','Camel','Brown','Chocolate',
+  'Light Gray','Gray','Silver','Gold',
+  'Blush','Pink','Rose','Hot Pink',
+  'Coral','Red','Rust','Burgundy',
+  'Orange','Mustard','Yellow',
+  'Olive','Sage','Green','Forest Green',
+  'Baby Blue','Sky Blue','Denim','Blue','Royal Blue','Navy',
+  'Lavender','Lilac','Purple','Plum',
+  'Charcoal','Black',
+  'Multicolor','Print','Pattern'
+];
+const colorRank = c => { const i = COLOR_ORDER.indexOf(c); return i === -1 ? 999 : i; };
+
 const OUTFIT_OCCASIONS = [
   'Casual Day','Weekend','Brunch','Work','Smart Casual','Date Night',
   'Party','Night Out','Travel','Beach','Summer','Winter','Formal',
@@ -1040,7 +1055,7 @@ function WardrobeTab({ items, setItems, currentUser }) {
     const showSections = filterCat === 'All' && !search;
     if (!showSections) return null; // null = flat grid
     return CATEGORIES
-      .map(cat => ({ cat, items: filtered.filter(i => i.category === cat) }))
+      .map(cat => ({ cat, items: filtered.filter(i => i.category === cat).sort((a,b)=>colorRank(a.color)-colorRank(b.color)) }))
       .filter(g => g.items.length > 0);
   }, [filtered, filterCat, search]);
 
@@ -1093,7 +1108,7 @@ function WardrobeTab({ items, setItems, currentUser }) {
               </div>
             ))
           : <div className="photo-grid">
-              {filtered.map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
+              {[...filtered].sort((a,b)=>colorRank(a.color)-colorRank(b.color)).map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
             </div>
       }
     </div>
@@ -1118,7 +1133,7 @@ function BuilderTab({ items, setOutfits, currentUser }) {
   // Build category rows — only categories that have items
   const categoryRows = useMemo(() =>
     CATEGORIES
-      .map(cat => ({ cat, catItems: items.filter(i => i.category === cat) }))
+      .map(cat => ({ cat, catItems: items.filter(i => i.category === cat).sort((a,b)=>colorRank(a.color)-colorRank(b.color)) }))
       .filter(r => r.catItems.length > 0),
     [items]
   );
