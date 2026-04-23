@@ -478,6 +478,10 @@ const OUTFIT_OCCASIONS = [
   '🕶️ Going Out - Day','🪩 Going Out - Night','🌊 Beach','🏔️ Hike'
 ];
 const OUTFIT_SEASONS = ['☀️ Summer','🍃 Spring/Fall','🌨️ Winter'];
+const DEFAULT_TAG_GROUPS = [
+  { id:'occasion', name:'Occasion', tags:[...OUTFIT_OCCASIONS] },
+  { id:'season',   name:'Season',   tags:[...OUTFIT_SEASONS]   },
+];
 const STORAGE_KEY_USERS = 'outfitguide_users';
 const SK_CURRENT_USER   = 'outfitguide_currentUser'; // sessionStorage
 function storageKey(type, username) { return `outfitguide_${type}_${username}`; }
@@ -532,7 +536,7 @@ async function analyzeClothingImage(photoUrl, apiKey) {
   return JSON.parse((data.content?.find(b=>b.type==='text')?.text||'').replace(/```json|```/g,'').trim());
 }
 
-async function suggestOutfitOccasions(selectedItems, apiKey) {
+async function suggestOutfitOccasions(selectedItems, apiKey, tagGroups) {
   const contentBlocks = [];
   for (const item of selectedItems) {
     if (item.photo) {
@@ -543,7 +547,10 @@ async function suggestOutfitOccasions(selectedItems, apiKey) {
     }
   }
   const itemSummary = selectedItems.map(i=>`${i.name} (${i.category}, ${i.color}${i.tags.length?', '+i.tags.join('/'):''})`).join('; ');
-  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 tags (occasion and/or season). Reply ONLY with a JSON array.\nOccasion options: ${OUTFIT_OCCASIONS.join(', ')}\nSeason options: ${OUTFIT_SEASONS.join(', ')}\nExample: ["💼 Work","☀️ Summer"]` });
+  const groups = tagGroups || DEFAULT_TAG_GROUPS;
+  const groupsDesc = groups.map(g => `${g.name}: ${g.tags.join(', ')}`).join('\n');
+  const exampleTag = groups[0]?.tags[0] || '💼 Work';
+  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 tags from the groups below. Reply ONLY with a JSON array.\n${groupsDesc}\nExample: ["${exampleTag}"]` });
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
     headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
@@ -555,7 +562,8 @@ async function suggestOutfitOccasions(selectedItems, apiKey) {
   return parsed.filter(o=>OUTFIT_OCCASIONS.includes(o));
 }
 
-function OccasionPicker({ selected, onChange }) {
+function OccasionPicker({ selected, onChange, tagGroups }) {
+  const groups = tagGroups || DEFAULT_TAG_GROUPS;
   const toggle = occ => onChange(selected.includes(occ) ? selected.filter(o=>o!==occ) : [...selected, occ]);
   const chip = occ => {
     const active = selected.includes(occ);
@@ -571,13 +579,12 @@ function OccasionPicker({ selected, onChange }) {
   };
   return (
     <div>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
-        {OUTFIT_OCCASIONS.map(chip)}
-      </div>
-      <p style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:5 }}>Season</p>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
-        {OUTFIT_SEASONS.map(chip)}
-      </div>
+      {groups.map((group, gi) => (
+        <div key={group.id||gi} style={{ marginBottom: gi < groups.length-1 ? 10 : 0 }}>
+          {groups.length > 1 && <p style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:5 }}>{group.name}</p>}
+          <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>{group.tags.map(chip)}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -685,13 +692,32 @@ function LoginScreen({ onLogin }) {
 }
 
 /* ── Settings Modal ── */
-function SettingsModal({ onClose, currentUser }) {
+function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups }) {
   const [key, setKey] = useState(() => localStorage.getItem(storageKey('apikey', currentUser))||'');
   const [saved, setSaved] = useState(false);
   const loadCloud = () => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } };
   const [cloudName, setCloudName] = useState(()=>loadCloud().cloudName||'');
   const [uploadPreset, setUploadPreset] = useState(()=>loadCloud().uploadPreset||'');
   const [cloudSaved, setCloudSaved] = useState(false);
+  const [groups, setGroups] = useState(tagGroups||DEFAULT_TAG_GROUPS);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [addTagInputs, setAddTagInputs] = useState({});
+
+  const updateGroups = updated => { setGroups(updated); setTagGroups(updated); };
+  const renameGroup = (gi, name) => updateGroups(groups.map((g,i)=>i===gi?{...g,name}:g));
+  const deleteGroup = gi => updateGroups(groups.filter((_,i)=>i!==gi));
+  const addTag = gi => {
+    const val = (addTagInputs[gi]||'').trim(); if(!val) return;
+    updateGroups(groups.map((g,i)=>i===gi?{...g,tags:[...g.tags,val]}:g));
+    setAddTagInputs(p=>({...p,[gi]:''}));
+  };
+  const deleteTag = (gi,ti) => updateGroups(groups.map((g,i)=>i===gi?{...g,tags:g.tags.filter((_,j)=>j!==ti)}:g));
+  const addGroup = () => {
+    const name = newGroupName.trim(); if(!name) return;
+    updateGroups([...groups,{id:Date.now(),name,tags:[]}]);
+    setNewGroupName('');
+  };
+
   const saveApiKey = () => { localStorage.setItem(storageKey('apikey', currentUser), key.trim()); setSaved(true); setTimeout(()=>setSaved(false),1500); };
   const saveCloudinary = () => {
     localStorage.setItem(storageKey('cloudinary', currentUser), JSON.stringify({ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() }));
@@ -727,6 +753,39 @@ function SettingsModal({ onClose, currentUser }) {
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn-primary" style={{ flex:1 }} onClick={saveApiKey}>{saved?'✓ Saved!':'Save API key'}</button>
             {key && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(storageKey('apikey', currentUser)); setKey(''); }}>Remove</button>}
+          </div>
+        </div>
+        <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'18px 0' }} />
+        <div>
+          <p style={{ fontWeight:600, fontSize:12, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Tag Groups</p>
+          <p style={{ fontSize:11, color:'var(--text3)', marginBottom:12, lineHeight:1.5 }}>Customize the tags shown when building outfits.</p>
+          {groups.map((group, gi) => (
+            <div key={group.id||gi} style={{ marginBottom:12, padding:10, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                <input value={group.name} onChange={e=>renameGroup(gi,e.target.value)} style={{ flex:1, fontWeight:600, fontSize:13, padding:'3px 6px' }} />
+                <button className="btn-danger" style={{ padding:'2px 8px', fontSize:11, whiteSpace:'nowrap' }} onClick={()=>deleteGroup(gi)}>Delete</button>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+                {group.tags.map((tag,ti)=>(
+                  <span key={ti} style={{ display:'inline-flex', alignItems:'center', gap:3, padding:'3px 6px 3px 9px', background:'var(--bg3)', border:'1px solid var(--border2)', borderRadius:20, fontSize:11 }}>
+                    {tag}
+                    <button style={{ border:'none', padding:'0 2px', fontSize:10, color:'var(--text3)', lineHeight:1, cursor:'pointer' }} onClick={()=>deleteTag(gi,ti)}>✕</button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display:'flex', gap:5 }}>
+                <input value={addTagInputs[gi]||''} onChange={e=>setAddTagInputs(p=>({...p,[gi]:e.target.value}))}
+                  placeholder="Add tag…" style={{ flex:1, fontSize:12 }}
+                  onKeyDown={e=>{ if(e.key==='Enter') addTag(gi); }} />
+                <button style={{ padding:'4px 10px', fontSize:12 }} onClick={()=>addTag(gi)}>+</button>
+              </div>
+            </div>
+          ))}
+          <div style={{ display:'flex', gap:5, marginTop:4 }}>
+            <input value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}
+              placeholder="New group name…" style={{ flex:1, fontSize:12 }}
+              onKeyDown={e=>{ if(e.key==='Enter') addGroup(); }} />
+            <button style={{ padding:'4px 10px', fontSize:12 }} onClick={addGroup}>+ Add group</button>
           </div>
         </div>
       </div>
@@ -1123,7 +1182,7 @@ function WardrobeTab({ items, setItems, currentUser }) {
 }
 
 /* ── Builder Tab — horizontal carousel ── */
-function BuilderTab({ items, setOutfits, currentUser }) {
+function BuilderTab({ items, setOutfits, currentUser, tagGroups }) {
   const [selected, setSelected] = useState([]);
   const [occasions, setOccasions] = useState([]);
   const [outfitName, setOutfitName] = useState('');
@@ -1148,7 +1207,7 @@ function BuilderTab({ items, setOutfits, currentUser }) {
   const suggestOcc = async () => {
     if(!selectedItems.length||!apiKey) return;
     setAiLoading(true); setAiError('');
-    try { const s = await suggestOutfitOccasions(selectedItems, apiKey); setOccasions(s); }
+    try { const s = await suggestOutfitOccasions(selectedItems, apiKey, tagGroups); setOccasions(s); }
     catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
     setAiLoading(false);
   };
@@ -1221,9 +1280,6 @@ function BuilderTab({ items, setOutfits, currentUser }) {
             ))}
           </div>
         )}
-        {selectedItems.length === 0 && (
-          <p style={{ fontSize:12, color:'var(--text3)', marginBottom:14, lineHeight:1.8 }}>Scroll through the rows above and click pieces to add them.</p>
-        )}
 
         <div className="form-row">
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:7 }}>
@@ -1234,7 +1290,7 @@ function BuilderTab({ items, setOutfits, currentUser }) {
               </button>
             )}
           </div>
-          <OccasionPicker selected={occasions} onChange={setOccasions} />
+          <OccasionPicker selected={occasions} onChange={setOccasions} tagGroups={tagGroups} />
           {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:5 }}>{aiError}</p>}
           {!apiKey && <p style={{ fontSize:10, color:'var(--text3)', marginTop:5 }}>Add API key in Settings for AI suggestions.</p>}
         </div>
@@ -1252,7 +1308,7 @@ function BuilderTab({ items, setOutfits, currentUser }) {
 }
 
 /* ── Edit Outfit Modal ── */
-function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
+function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroups }) {
   const [selected, setSelected] = useState(outfit.itemIds||[]);
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [outfitName, setOutfitName] = useState(outfit.name||'');
@@ -1268,7 +1324,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
   const suggestOcc = async () => {
     if(!selectedItems.length||!apiKey) return;
     setAiLoading(true); setAiError('');
-    try { setOccasions(await suggestOutfitOccasions(selectedItems, apiKey)); }
+    try { setOccasions(await suggestOutfitOccasions(selectedItems, apiKey, tagGroups)); }
     catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
     setAiLoading(false);
   };
@@ -1320,7 +1376,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
                   <label style={{ margin:0 }}>Occasion *</label>
                   {apiKey && selectedItems.length>0 && <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>{aiLoading?<><span className="spinner"/>…</>:'✨ AI'}</button>}
                 </div>
-                <OccasionPicker selected={occasions} onChange={setOccasions} />
+                <OccasionPicker selected={occasions} onChange={setOccasions} tagGroups={tagGroups} />
                 {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:4 }}>{aiError}</p>}
               </div>
               <div className="form-row">
@@ -1341,7 +1397,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
 }
 
 /* ── Outfits Tab ── */
-function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser }) {
+function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGroups }) {
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
@@ -1354,8 +1410,9 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser }) {
   };
   const usedOccasions = useMemo(() => {
     const all = outfits.flatMap(o=>o.occasions||[]);
-    return ['All', ...[...OUTFIT_OCCASIONS, ...OUTFIT_SEASONS].filter(o=>all.includes(o))];
-  }, [outfits]);
+    const allTags = (tagGroups||DEFAULT_TAG_GROUPS).flatMap(g=>g.tags);
+    return ['All', ...allTags.filter(o=>all.includes(o))];
+  }, [outfits, tagGroups]);
   const filtered = outfits.filter(o => {
     if(search && ![o.name||'',o.notes||'',...(o.occasions||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     if(filterOcc!=='All' && !(o.occasions||[]).includes(filterOcc)) return false;
@@ -1363,7 +1420,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser }) {
   });
   return (
     <div className="content">
-      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} currentUser={currentUser} />}
+      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} currentUser={currentUser} tagGroups={tagGroups} />}
       {/* Toolbar */}
       <div className="toolbar">
         {usedOccasions.map(occ=>(
@@ -1427,12 +1484,14 @@ function MainApp({ currentUser, onLogout }) {
   const [tab, setTab] = useState('wardrobe');
   const [items, setItems] = useState(()=>loadState(storageKey('items', currentUser), SAMPLE_ITEMS));
   const [outfits, setOutfits] = useState(()=>loadState(storageKey('outfits', currentUser), SAMPLE_OUTFITS));
+  const [tagGroups, setTagGroups] = useState(()=>loadState(storageKey('taggroups', currentUser), DEFAULT_TAG_GROUPS));
   const [showSettings, setShowSettings] = useState(false);
   const [hasKey, setHasKey] = useState(()=>!!localStorage.getItem(storageKey('apikey', currentUser)));
   const [hasCloud, setHasCloud] = useState(()=>{ try { const c=JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); return !!(c.cloudName&&c.uploadPreset); } catch { return false; } });
 
   useEffect(()=>{ try { localStorage.setItem(storageKey('items', currentUser), JSON.stringify(items)); } catch {} }, [items]);
   useEffect(()=>{ try { localStorage.setItem(storageKey('outfits', currentUser), JSON.stringify(outfits)); } catch {} }, [outfits]);
+  useEffect(()=>{ try { localStorage.setItem(storageKey('taggroups', currentUser), JSON.stringify(tagGroups)); } catch {} }, [tagGroups]);
 
   const onSettingsClose = () => {
     setShowSettings(false);
@@ -1448,7 +1507,7 @@ function MainApp({ currentUser, onLogout }) {
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>
-      {showSettings && <SettingsModal onClose={onSettingsClose} currentUser={currentUser} />}
+      {showSettings && <SettingsModal onClose={onSettingsClose} currentUser={currentUser} tagGroups={tagGroups} setTagGroups={setTagGroups} />}
 
       {/* Top nav */}
       <div className="top-nav">
@@ -1488,8 +1547,8 @@ function MainApp({ currentUser, onLogout }) {
 
       {/* Tab content */}
       {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} currentUser={currentUser} />}
-      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} currentUser={currentUser} />}
-      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} setItems={setItems} currentUser={currentUser} />}
+      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} currentUser={currentUser} tagGroups={tagGroups} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} setItems={setItems} currentUser={currentUser} tagGroups={tagGroups} />}
     </div>
   );
 }
