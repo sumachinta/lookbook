@@ -474,10 +474,10 @@ const COLOR_ORDER = [
 const colorRank = c => { const i = COLOR_ORDER.indexOf(c); return i === -1 ? 999 : i; };
 
 const OUTFIT_OCCASIONS = [
-  'Casual Day','Weekend','Brunch','Work','Smart Casual','Date Night',
-  'Party','Night Out','Travel','Beach','Summer','Winter','Formal',
-  'Wedding Guest','Festival','Gym'
+  '💼 Work','👟 Casual Wear','🛋️ Lounge Wear','🏋️ Gym',
+  '🕶️ Going Out - Day','🪩 Going Out - Night','🌊 Beach','🏔️ Hike'
 ];
+const OUTFIT_SEASONS = ['☀️ Summer','🍃 Spring/Fall','🌨️ Winter'];
 const STORAGE_KEY_USERS = 'outfitguide_users';
 const SK_CURRENT_USER   = 'outfitguide_currentUser'; // sessionStorage
 function storageKey(type, username) { return `outfitguide_${type}_${username}`; }
@@ -543,7 +543,7 @@ async function suggestOutfitOccasions(selectedItems, apiKey) {
     }
   }
   const itemSummary = selectedItems.map(i=>`${i.name} (${i.category}, ${i.color}${i.tags.length?', '+i.tags.join('/'):''})`).join('; ');
-  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 occasion tags. Reply ONLY with a JSON array.\nAvailable: ${OUTFIT_OCCASIONS.join(', ')}\nExample: ["Date Night","Summer"]` });
+  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 tags (occasion and/or season). Reply ONLY with a JSON array.\nOccasion options: ${OUTFIT_OCCASIONS.join(', ')}\nSeason options: ${OUTFIT_SEASONS.join(', ')}\nExample: ["💼 Work","☀️ Summer"]` });
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST',
     headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
@@ -557,20 +557,27 @@ async function suggestOutfitOccasions(selectedItems, apiKey) {
 
 function OccasionPicker({ selected, onChange }) {
   const toggle = occ => onChange(selected.includes(occ) ? selected.filter(o=>o!==occ) : [...selected, occ]);
+  const chip = occ => {
+    const active = selected.includes(occ);
+    return (
+      <button key={occ} onClick={()=>toggle(occ)} style={{
+        padding:'4px 11px', fontSize:12, borderRadius:20,
+        border: active ? '1.5px solid var(--text)' : '1px solid var(--border2)',
+        background: active ? 'var(--text)' : 'transparent',
+        color: active ? 'var(--bg)' : 'var(--text2)',
+        fontWeight: active ? 600 : 400, transition:'all 0.12s'
+      }}>{occ}</button>
+    );
+  };
   return (
-    <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
-      {OUTFIT_OCCASIONS.map(occ => {
-        const active = selected.includes(occ);
-        return (
-          <button key={occ} onClick={()=>toggle(occ)} style={{
-            padding:'4px 11px', fontSize:12, borderRadius:20,
-            border: active ? '1.5px solid var(--text)' : '1px solid var(--border2)',
-            background: active ? 'var(--text)' : 'transparent',
-            color: active ? 'var(--bg)' : 'var(--text2)',
-            fontWeight: active ? 600 : 400, transition:'all 0.12s'
-          }}>{occ}</button>
-        );
-      })}
+    <div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+        {OUTFIT_OCCASIONS.map(chip)}
+      </div>
+      <p style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:5 }}>Season</p>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+        {OUTFIT_SEASONS.map(chip)}
+      </div>
     </div>
   );
 }
@@ -1232,10 +1239,6 @@ function BuilderTab({ items, setOutfits, currentUser }) {
           {!apiKey && <p style={{ fontSize:10, color:'var(--text3)', marginTop:5 }}>Add API key in Settings for AI suggestions.</p>}
         </div>
         <div className="form-row">
-          <label>Label <span style={{ color:'var(--text3)', fontWeight:400, textTransform:'none' }}>(optional)</span></label>
-          <input value={outfitName} onChange={e=>setOutfitName(e.target.value)} placeholder="e.g. Favourite date look" />
-        </div>
-        <div className="form-row">
           <label>Notes</label>
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="When to wear, tips…" style={{ resize:'vertical', minHeight:52 }} />
         </div>
@@ -1321,10 +1324,6 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser }) {
                 {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:4 }}>{aiError}</p>}
               </div>
               <div className="form-row">
-                <label>Label</label>
-                <input value={outfitName} onChange={e=>setOutfitName(e.target.value)} placeholder="e.g. Favourite date look" />
-              </div>
-              <div className="form-row">
                 <label>Notes</label>
                 <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Tips…" style={{ resize:'vertical', minHeight:48 }} />
               </div>
@@ -1355,7 +1354,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser }) {
   };
   const usedOccasions = useMemo(() => {
     const all = outfits.flatMap(o=>o.occasions||[]);
-    return ['All', ...OUTFIT_OCCASIONS.filter(o=>all.includes(o))];
+    return ['All', ...[...OUTFIT_OCCASIONS, ...OUTFIT_SEASONS].filter(o=>all.includes(o))];
   }, [outfits]);
   const filtered = outfits.filter(o => {
     if(search && ![o.name||'',o.notes||'',...(o.occasions||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
