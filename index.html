@@ -795,6 +795,8 @@ function ItemModal({ item, onSave, onClose, currentUser }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiDone, setAiDone] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanced, setEnhanced] = useState(() => !!(item?.photo?.includes('e_background_removal')));
   const fileRef = useRef();
   const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
   const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
@@ -811,6 +813,19 @@ function ItemModal({ item, onSave, onClose, currentUser }) {
       setAiDone(true);
     } catch(err) { setAiError('AI analysis failed. Check your API key in Settings.'); }
     setAnalyzing(false);
+  };
+
+  const enhancePhoto = async () => {
+    const transformedUrl = form.photo.replace('/upload/', '/upload/e_background_removal,e_improve/');
+    setEnhancing(true);
+    try {
+      await new Promise((resolve, reject) => {
+        const img = new window.Image(); img.onload = resolve; img.onerror = reject; img.src = transformedUrl;
+      });
+    } catch { /* Cloudinary may return error for some images; still store the URL */ }
+    set('photo', transformedUrl);
+    setEnhanced(true);
+    setEnhancing(false);
   };
 
   const handleFile = async e => {
@@ -864,7 +879,17 @@ function ItemModal({ item, onSave, onClose, currentUser }) {
               {uploadErr && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{uploadErr}</p>}
               {aiError && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{aiError}</p>}
               {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setAiDone(false); setUploadErr(''); }}>Remove photo</button>}
-              {form.photo && form.photo.startsWith('http') && <p style={{ fontSize:10, color:'#39a855' }}>☁ On Cloudinary CDN</p>}
+              {form.photo && form.photo.startsWith('http') && (
+                <>
+                  <p style={{ fontSize:10, color:'#39a855' }}>☁ On Cloudinary CDN</p>
+                  {enhanced
+                    ? <p style={{ fontSize:10, color:'#39a855' }}>✓ Enhanced</p>
+                    : <button onClick={enhancePhoto} disabled={enhancing||uploading} style={{ fontSize:11 }}>
+                        {enhancing ? <><span className="spinner"/>Enhancing…</> : '✨ Enhance photo'}
+                      </button>
+                  }
+                </>
+              )}
             </div>
           </div>
         </div>
