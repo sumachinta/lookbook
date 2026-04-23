@@ -825,7 +825,7 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
 }
 
 /* ── Item Detail Modal (click on grid card) ── */
-function ItemDetailModal({ item, onClose, onEdit, onDelete }) {
+function ItemDetailModal({ item, onClose, onEdit, onDelete, tagGroups }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="detail-modal" onClick={e=>e.stopPropagation()}>
@@ -846,11 +846,15 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete }) {
                 {item.color && <span style={{ display:'flex', alignItems:'center', fontSize:12, color:'var(--text2)' }}>{colorDot(item.color)}{item.color}</span>}
               </div>
               <h2>{item.name}</h2>
-              {item.tags?.length > 0 && (
-                <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:10 }}>
-                  {item.tags.map(t=><span key={t} style={{ padding:'3px 10px', fontSize:11, borderRadius:20, border:'1px solid var(--border2)', color:'var(--text2)', background:'var(--bg2)' }}>{t}</span>)}
-                </div>
-              )}
+              {(() => {
+                const validTags = (tagGroups||DEFAULT_TAG_GROUPS).flatMap(g=>g.tags);
+                const displayTags = (item.tags||[]).filter(t=>validTags.includes(t));
+                return displayTags.length > 0 ? (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:10 }}>
+                    {displayTags.map(t=><span key={t} style={{ padding:'3px 10px', fontSize:11, borderRadius:20, border:'1px solid var(--border2)', color:'var(--text2)', background:'var(--bg2)' }}>{t}</span>)}
+                  </div>
+                ) : null;
+              })()}
               {item.purchaseLink && (
                 <a href={item.purchaseLink} target="_blank" rel="noopener"
                    style={{ display:'inline-flex', alignItems:'center', gap:5, marginTop:18, fontSize:12, color:'var(--accent)', textDecoration:'none', fontWeight:500 }}>
@@ -897,7 +901,16 @@ function ItemModal({ item, onSave, onClose, currentUser, tagGroups, categories }
     setAnalyzing(true); setAiError(''); setAiDone(false);
     try {
       const r = await analyzeClothingImage(photo, apiKey, cats);
-      setForm(f=>({ ...f, name:r.name||f.name, category:cats.includes(r.category)?r.category:f.category, color:r.color||f.color }));
+      const catFinal = cats.includes(r.category) ? r.category : form.category;
+      const updates = { name:r.name||form.name, category:catFinal, color:r.color||form.color };
+      let tags = form.tags;
+      if (tagGroups?.length) {
+        try {
+          const tempItem = { name:updates.name, category:catFinal, color:updates.color, photo };
+          tags = await suggestOutfitOccasions([tempItem], apiKey, tagGroups);
+        } catch {}
+      }
+      setForm(f=>({ ...f, ...updates, tags }));
       setAiDone(true);
     } catch(err) { setAiError('AI analysis failed. Check your API key in Settings.'); }
     setAnalyzing(false);
@@ -1158,7 +1171,7 @@ function WardrobeTab({ items, setItems, currentUser, categories, tagGroups }) {
     <div className="content">
       {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} currentUser={currentUser} tagGroups={tagGroups} categories={cats} />}
       {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={items=>setItems(p=>[...p,...items])} currentUser={currentUser} categories={cats} />}
-      {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} />}
+      {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} tagGroups={tagGroups} />}
 
       {/* Toolbar */}
       <div className="toolbar">
