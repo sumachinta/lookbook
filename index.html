@@ -1351,14 +1351,31 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [outfitName, setOutfitName] = useState(outfit.name||'');
   const [notes, setNotes] = useState(outfit.notes||'');
+  const [photo, setPhoto] = useState(outfit.photo||'');
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState('');
   const [filterCat, setFilterCat] = useState('All');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const photoRef = useRef(null);
   const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
+  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
+  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
   const toggle = id => setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const filtered = filterCat==='All'?items:items.filter(i=>i.category===filterCat);
   const selectedItems = items.filter(i=>selected.includes(i.id));
   const canSave = selected.length>=2 && occasions.length>0;
+  const handleOutfitPhoto = async e => {
+    const file = e.target.files?.[0]; if(!file) return;
+    setUploadErr('');
+    const localUrl = URL.createObjectURL(file);
+    if(!cloudinaryReady) { setPhoto(localUrl); setUploadErr('⚠ Cloudinary not set up — photo saved locally only.'); return; }
+    setUploading(true);
+    try { const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset); setPhoto(url); }
+    catch(err) { setUploadErr('Upload failed. ' + err.message); }
+    setUploading(false);
+    e.target.value = '';
+  };
   const suggestOcc = async () => {
     if(!selectedItems.length||!apiKey) return;
     setAiLoading(true); setAiError('');
@@ -1368,7 +1385,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
   };
   const submit = () => {
     if(!canSave) return;
-    onSave({ ...outfit, name:outfitName.trim()||occasions.join(' · '), itemIds:selected, occasions, notes });
+    onSave({ ...outfit, name:outfitName.trim()||occasions.join(' · '), itemIds:selected, occasions, notes, photo });
     onClose();
   };
   return (
@@ -1409,6 +1426,21 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
                 </div>
             }
             <div style={{ borderTop:'1px solid var(--border)', paddingTop:12 }}>
+              <div className="form-row">
+                <label style={{ display:'flex', gap:5, alignItems:'center' }}>Outfit photo <span style={{ fontWeight:400, fontSize:10, color:'var(--text3)', textTransform:'none', letterSpacing:0 }}>optional</span></label>
+                <input ref={photoRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handleOutfitPhoto} />
+                {photo ? (
+                  <div style={{ position:'relative', marginTop:6 }}>
+                    <img src={photo} style={{ width:'100%', height:140, objectFit:'cover', borderRadius:'var(--radius)', border:'1px solid var(--border)' }} alt="" />
+                    <button style={{ position:'absolute', top:6, right:6, padding:'2px 7px', fontSize:11, background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }} onClick={()=>setPhoto('')}>✕</button>
+                  </div>
+                ) : (
+                  <button style={{ width:'100%', padding:'10px', fontSize:12, border:'1px dashed var(--border2)', borderRadius:'var(--radius)', background:'var(--bg2)', color:'var(--text2)', cursor:'pointer', marginTop:6 }} onClick={()=>photoRef.current?.click()} disabled={uploading}>
+                    {uploading ? <><span className="spinner"/> Uploading…</> : '+ Add your styled photo'}
+                  </button>
+                )}
+                {uploadErr && <p style={{ fontSize:10, color:'#c00', marginTop:3 }}>{uploadErr}</p>}
+              </div>
               <div className="form-row">
                 {apiKey && selectedItems.length>0 && (
                   <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:6 }}>
@@ -1500,13 +1532,28 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
                         <button className="btn-danger" style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
                       </div>
                     </div>
-                    <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
-                      {oi.map(item=>(
-                        <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                          {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                    {outfit.photo ? (
+                      <>
+                        <div style={{ width:'100%', height:210, borderRadius:'var(--radius)', overflow:'hidden', marginBottom:8 }}>
+                          <img src={outfit.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" />
                         </div>
-                      ))}
-                    </div>
+                        <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
+                          {oi.map(item=>(
+                            <div key={item.id} style={{ width:44, height:55, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                              {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:18 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
+                        {oi.map(item=>(
+                          <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                            {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', paddingTop:8, borderTop:'1px solid var(--border)', fontStyle:'italic', lineHeight:1.6 }}>{outfit.notes}</p>}
                   </div>
                 );
