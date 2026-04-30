@@ -1472,6 +1472,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   const saveEdit = updated => setOutfits(p=>p.map(o=>o.id===updated.id?updated:o));
 
   const logWear = (outfit) => {
@@ -1509,52 +1510,61 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
               {filtered.map(outfit => {
                 const oi = items.filter(i=>outfit.itemIds.includes(i.id));
                 const cats = [...new Set(oi.map(i=>i.category))];
+                const isOpen = expandedId === outfit.id;
+                const displayName = outfit.name || (outfit.occasions||[]).join(' · ') || 'Untitled outfit';
                 return (
-                  <div key={outfit.id} className="outfit-card">
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:6 }}>
-                          {(outfit.occasions||[]).map(occ=>(
-                            <span key={occ} style={{ fontSize:12, fontWeight:600, padding:'3px 10px', borderRadius:20, background:'var(--text)', color:'var(--bg)' }}>{occ}</span>
-                          ))}
-                        </div>
-                        <p style={{ fontSize:12, color:'var(--text2)' }}>{oi.length} pieces · {cats.join(', ')}</p>
-                        {outfit.name && outfit.name!==(outfit.occasions||[]).join(' · ') && (
-                          <p style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>{outfit.name}</p>
-                        )}
-                        {(outfit.wornCount > 0) && (
-                          <p style={{ fontSize:10, color:'var(--text3)', marginTop:3 }}>Worn {outfit.wornCount}×{outfit.lastWorn ? ` · ${new Date(outfit.lastWorn).toLocaleDateString(undefined,{month:'short',day:'numeric'})}` : ''}</p>
-                        )}
-                      </div>
-                      <div style={{ display:'flex', gap:5, flexShrink:0, marginLeft:8, alignItems:'center' }}>
-                        <button title="Log as worn today" style={{ padding:'3px 10px', fontSize:13, fontWeight:600, background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:'var(--radius)' }} onClick={()=>logWear(outfit)}>+</button>
-                        <button style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
-                        <button className="btn-danger" style={{ padding:'3px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
-                      </div>
+                  <div key={outfit.id} className="outfit-card" style={{ cursor:'pointer' }} onClick={()=>setExpandedId(isOpen?null:outfit.id)}>
+                    {/* Collapsed header — always visible */}
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <p style={{ fontWeight:600, fontSize:13, letterSpacing:'-0.01em', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, minWidth:0 }}>{displayName}</p>
+                      <button title="Log as worn today" style={{ padding:'3px 10px', fontSize:13, fontWeight:600, background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:'var(--radius)', flexShrink:0, marginLeft:8 }} onClick={e=>{e.stopPropagation(); logWear(outfit);}}>+</button>
                     </div>
-                    {outfit.photo ? (
-                      <>
-                        <div style={{ width:'100%', height:210, borderRadius:'var(--radius)', overflow:'hidden', marginBottom:8 }}>
-                          <img src={outfit.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" />
-                        </div>
-                        <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
-                          {oi.map(item=>(
-                            <div key={item.id} style={{ width:44, height:55, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                              {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:18 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
-                        {oi.map(item=>(
-                          <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                            {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+
+                    {/* Expanded content */}
+                    {isOpen && (
+                      <div style={{ marginTop:10 }} onClick={e=>e.stopPropagation()}>
+                        {(outfit.occasions||[]).length > 0 && (
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:6 }}>
+                            {(outfit.occasions||[]).map(occ=>(
+                              <span key={occ} style={{ fontSize:12, fontWeight:600, padding:'3px 10px', borderRadius:20, background:'var(--text)', color:'var(--bg)' }}>{occ}</span>
+                            ))}
                           </div>
-                        ))}
+                        )}
+                        <p style={{ fontSize:11, color:'var(--text3)', marginBottom:4 }}>{oi.length} pieces · {cats.join(', ')}</p>
+                        {(outfit.wornCount > 0) && (
+                          <p style={{ fontSize:10, color:'var(--text3)', marginBottom:8 }}>Worn {outfit.wornCount}×{outfit.lastWorn ? ` · ${new Date(outfit.lastWorn).toLocaleDateString(undefined,{month:'short',day:'numeric'})}` : ''}</p>
+                        )}
+
+                        {outfit.photo ? (
+                          <div style={{ display:'flex', gap:8, marginBottom:outfit.notes?10:0, height:280 }}>
+                            <div style={{ flexShrink:0, width:'55%', borderRadius:'var(--radius)', overflow:'hidden' }}>
+                              <img src={outfit.photo} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} alt="" />
+                            </div>
+                            <div style={{ flex:1, display:'flex', flexDirection:'column', gap:5, overflowY:'auto' }}>
+                              {oi.map(item=>(
+                                <div key={item.id} style={{ width:'100%', height:60, flexShrink:0, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:20 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:outfit.notes?8:0 }}>
+                            {oi.map(item=>(
+                              <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', paddingTop:8, borderTop:'1px solid var(--border)', fontStyle:'italic', lineHeight:1.6, marginBottom:10 }}>{outfit.notes}</p>}
+                        <div style={{ display:'flex', gap:8, marginTop:10, paddingTop:10, borderTop:'1px solid var(--border)' }}>
+                          <button style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
+                          <button className="btn-danger" style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
+                        </div>
                       </div>
                     )}
-                    {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', paddingTop:8, borderTop:'1px solid var(--border)', fontStyle:'italic', lineHeight:1.6 }}>{outfit.notes}</p>}
                   </div>
                 );
               })}
