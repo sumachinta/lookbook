@@ -3,13 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wardrobe</title>
+<title>Lookbook</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#191816">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Lookbook">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root {
   --bg: #faf9f7;
@@ -444,6 +451,45 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
+// ── Supabase ─────────────────────────────────────────────────
+// Fill in your project URL and anon key from supabase.com → Project Settings → API
+// Also: disable "Confirm email" in Authentication → Settings
+const SUPABASE_URL  = 'https://YOUR_PROJECT_REF.supabase.co';
+const SUPABASE_ANON = 'YOUR_ANON_KEY_HERE';
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── Data mappers (camelCase ↔ snake_case) ─────────────────────
+function rowToItem(r) {
+  return { id:r.id, name:r.name, category:r.category, color:r.color||'', brand:r.brand||'', cost:r.cost,
+    tags:r.tags||[], photo:r.photo||'', purchaseLink:r.purchase_link||'',
+    wornCount:r.worn_count||0, lastWorn:r.last_worn||null };
+}
+function itemToRow(item, userId) {
+  return { user_id:userId, name:item.name, category:item.category, color:item.color||'',
+    brand:item.brand||'', cost:item.cost||null, tags:item.tags||[], photo:item.photo||'',
+    purchase_link:item.purchaseLink||'', worn_count:item.wornCount||0, last_worn:item.lastWorn||null };
+}
+function rowToOutfit(r) {
+  return { id:r.id, name:r.name||'', itemIds:r.item_ids||[], occasions:r.occasions||[],
+    notes:r.notes||'', photo:r.photo||'', wornCount:r.worn_count||0, lastWorn:r.last_worn||null };
+}
+function outfitToRow(outfit, userId) {
+  return { user_id:userId, name:outfit.name||'', item_ids:outfit.itemIds||[],
+    occasions:outfit.occasions||[], notes:outfit.notes||'', photo:outfit.photo||'',
+    worn_count:outfit.wornCount||0, last_worn:outfit.lastWorn||null };
+}
+
+async function seedSampleData(userId) {
+  const { data: rows } = await db.from('items')
+    .insert(SAMPLE_ITEMS.map(item => itemToRow(item, userId))).select('id');
+  if (!rows?.length) return;
+  const idMap = {};
+  SAMPLE_ITEMS.forEach((item, i) => { idMap[item.id] = rows[i]?.id; });
+  await db.from('outfits').insert(SAMPLE_OUTFITS.map(o => ({
+    ...outfitToRow(o, userId), item_ids: o.itemIds.map(id => idMap[id]).filter(Boolean)
+  })));
+}
+
 const DEFAULT_CATEGORIES = ['Top','Bottom','Shoes','Outerwear','Accessory','Dress','Other'];
 const CAT_EMOJI  = { Top:'👕', Bottom:'👖', Shoes:'👟', Outerwear:'🧥', Dress:'👗', Accessory:'💍', Other:'👔' };
 const COLOR_DICT = [
@@ -482,9 +528,7 @@ const DEFAULT_TAG_GROUPS = [
   { id:'occasion', name:'Occasion', tags:[...OUTFIT_OCCASIONS] },
   { id:'season',   name:'Season',   tags:[...OUTFIT_SEASONS]   },
 ];
-const STORAGE_KEY_USERS = 'outfitguide_users';
-const SK_CURRENT_USER   = 'outfitguide_currentUser'; // sessionStorage
-function storageKey(type, username) { return `outfitguide_${type}_${username}`; }
+// Legacy constants removed — data now in Supabase
 
 const SAMPLE_ITEMS = [
   { id:1, name:'White linen shirt',     category:'Top',       color:'White',      brand:'Uniqlo', cost:29, tags:['casual','summer'],         photo:'', purchaseLink:'', wornCount:0, lastWorn:null },
@@ -500,15 +544,6 @@ const SAMPLE_OUTFITS = [
   { id:1, name:'Smart casual friday', itemIds:[1,2,4,5], occasions:['Smart Casual','Work'], notes:'Great for office-casual days', wornCount:0, lastWorn:null },
   { id:2, name:'Winter editorial',    itemIds:[6,8,3,4], occasions:['Winter','Date Night'],  notes:'Monochrome with blazer layering', wornCount:0, lastWorn:null },
 ];
-
-function loadState(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
-}
-
-async function hashPassword(password) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
 
 async function uploadToCloudinary(file, cloudName, uploadPreset) {
   const formData = new FormData();
@@ -623,24 +658,18 @@ function LoginScreen({ onLogin }) {
       const uname = username.trim().toLowerCase();
       if (!uname) { setError('Username is required.'); setLoading(false); return; }
       if (!password) { setError('Password is required.'); setLoading(false); return; }
-      const users = loadState(STORAGE_KEY_USERS, []);
+      const email = uname + '@lookbook.local';
       if (mode === 'login') {
-        const user = users.find(u => u.username === uname);
-        if (!user) { setError('Username not found.'); setLoading(false); return; }
-        const hash = await hashPassword(password);
-        if (hash !== user.passwordHash) { setError('Incorrect password.'); setLoading(false); return; }
-        sessionStorage.setItem(SK_CURRENT_USER, uname);
-        onLogin(uname);
+        const { data, error: authErr } = await db.auth.signInWithPassword({ email, password });
+        if (authErr) { setError('Invalid username or password.'); setLoading(false); return; }
+        onLogin(data.user);
       } else {
         if (password.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
         if (password !== confirm) { setError('Passwords do not match.'); setLoading(false); return; }
-        if (users.find(u => u.username === uname)) { setError('Username already taken.'); setLoading(false); return; }
-        const passwordHash = await hashPassword(password);
-        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify([...users, { username: uname, passwordHash, createdAt: Date.now() }]));
-        localStorage.setItem(storageKey('items', uname), JSON.stringify(SAMPLE_ITEMS));
-        localStorage.setItem(storageKey('outfits', uname), JSON.stringify(SAMPLE_OUTFITS));
-        sessionStorage.setItem(SK_CURRENT_USER, uname);
-        onLogin(uname);
+        const { data, error: authErr } = await db.auth.signUp({ email, password });
+        if (authErr) { setError(authErr.message || 'Registration failed.'); setLoading(false); return; }
+        await seedSampleData(data.user.id);
+        onLogin(data.user);
       }
     } catch(e) { setError('Something went wrong. Please try again.'); }
     setLoading(false);
@@ -693,13 +722,16 @@ function LoginScreen({ onLogin }) {
 }
 
 /* ── Settings Modal ── */
-function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categories, setCategories }) {
-  const [key, setKey] = useState(() => localStorage.getItem(storageKey('apikey', currentUser))||'');
+function SettingsModal({ onClose, currentUser, apiKey: initKey, cloudConfig: initCloud, tagGroups, setTagGroups, categories, setCategories, onSettingsSaved, items, outfits }) {
+  const [key, setKey] = useState(initKey||'');
   const [saved, setSaved] = useState(false);
-  const loadCloud = () => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } };
-  const [cloudName, setCloudName] = useState(()=>loadCloud().cloudName||'');
-  const [uploadPreset, setUploadPreset] = useState(()=>loadCloud().uploadPreset||'');
+  const [cloudName, setCloudName] = useState(initCloud?.cloudName||'');
+  const [uploadPreset, setUploadPreset] = useState(initCloud?.uploadPreset||'');
   const [cloudSaved, setCloudSaved] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importDone, setImportDone] = useState(false);
+  const [importError, setImportError] = useState('');
+  const importRef = useRef();
   const [groups, setGroups] = useState(tagGroups||DEFAULT_TAG_GROUPS);
   const [newGroupName, setNewGroupName] = useState('');
   const [addTagInputs, setAddTagInputs] = useState({});
@@ -727,10 +759,47 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
     setNewGroupName('');
   };
 
-  const saveApiKey = () => { localStorage.setItem(storageKey('apikey', currentUser), key.trim()); setSaved(true); setTimeout(()=>setSaved(false),1500); };
-  const saveCloudinary = () => {
-    localStorage.setItem(storageKey('cloudinary', currentUser), JSON.stringify({ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() }));
+  const saveApiKey = async () => {
+    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key.trim(), cloud_name:cloudName||null, upload_preset:uploadPreset||null });
+    onSettingsSaved({ apiKey: key.trim() });
+    setSaved(true); setTimeout(()=>setSaved(false),1500);
+  };
+  const removeApiKey = async () => {
+    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:null, cloud_name:cloudName||null, upload_preset:uploadPreset||null });
+    setKey(''); onSettingsSaved({ apiKey: '' });
+  };
+  const saveCloudinary = async () => {
+    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key||null, cloud_name:cloudName.trim(), upload_preset:uploadPreset.trim() });
+    onSettingsSaved({ cloudConfig:{ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() } });
     setCloudSaved(true); setTimeout(()=>{ setCloudSaved(false); onClose(); }, 900);
+  };
+  const removeCloudinary = async () => {
+    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key||null, cloud_name:null, upload_preset:null });
+    setCloudName(''); setUploadPreset('');
+    onSettingsSaved({ cloudConfig:{ cloudName:'', uploadPreset:'' } });
+  };
+  const handleExport = () => {
+    const data = { version:1, exportedAt:new Date().toISOString(), exportedBy:currentUser.email.replace('@lookbook.local',''), items, outfits, tagGroups:groups, categories:cats };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `lookbook-${currentUser.email.replace('@lookbook.local','')}-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  const handleImport = async (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    setImporting(true); setImportError('');
+    try {
+      const data = JSON.parse(await file.text());
+      const uid = currentUser.id; const idMap = {};
+      for (const item of (data.items||[])) {
+        const { data:row } = await db.from('items').insert({ user_id:uid, name:item.name, category:item.category, color:item.color||'', brand:item.brand||'', cost:item.cost||null, tags:item.tags||[], photo:item.photo||'', purchase_link:item.purchaseLink||'', worn_count:item.wornCount||0, last_worn:item.lastWorn||null }).select('id').single();
+        if(row) idMap[item.id] = row.id;
+      }
+      for (const outfit of (data.outfits||[])) {
+        await db.from('outfits').insert({ user_id:uid, name:outfit.name||'', item_ids:(outfit.itemIds||[]).map(id=>idMap[id]).filter(Boolean), occasions:outfit.occasions||[], notes:outfit.notes||'', photo:outfit.photo||'', worn_count:outfit.wornCount||0, last_worn:outfit.lastWorn||null });
+      }
+      setImportDone(true); setTimeout(()=>window.location.reload(), 1200);
+    } catch(err) { setImportError('Import failed: '+err.message); }
+    setImporting(false);
   };
   return (
     <div className="overlay" onClick={onClose}>
@@ -748,7 +817,7 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
           <div className="form-row"><label>Upload preset (unsigned)</label><input value={uploadPreset} onChange={e=>setUploadPreset(e.target.value)} placeholder="e.g. outfit_unsigned" /></div>
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn-primary" style={{ flex:1 }} onClick={saveCloudinary} disabled={!cloudName.trim()||!uploadPreset.trim()}>{cloudSaved?'✓ Saved!':'Save Cloudinary'}</button>
-            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(storageKey('cloudinary', currentUser)); setCloudName(''); setUploadPreset(''); }}>Remove</button>}
+            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={removeCloudinary}>Remove</button>}
           </div>
         </div>
         <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'0 0 18px' }} />
@@ -761,7 +830,7 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <button className="btn-primary" style={{ flex:1 }} onClick={saveApiKey}>{saved?'✓ Saved!':'Save API key'}</button>
-            {key && <button className="btn-danger" onClick={()=>{ localStorage.removeItem(storageKey('apikey', currentUser)); setKey(''); }}>Remove</button>}
+            {key && <button className="btn-danger" onClick={removeApiKey}>Remove</button>}
           </div>
         </div>
         <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'18px 0' }} />
@@ -818,6 +887,19 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
               onKeyDown={e=>{ if(e.key==='Enter') addCat(); }} />
             <button style={{ padding:'4px 10px', fontSize:12 }} onClick={addCat}>+</button>
           </div>
+        </div>
+        <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'18px 0' }} />
+        <div>
+          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Data Backup</p>
+          <div style={{ display:'flex', gap:8 }}>
+            <button style={{ flex:1, fontSize:12 }} onClick={handleExport}>↓ Export backup</button>
+            <button style={{ flex:1, fontSize:12 }} onClick={()=>importRef.current?.click()} disabled={importing||importDone}>
+              {importing?<><span className="spinner"/>Importing…</>:importDone?'✓ Reloading…':'↑ Import backup'}
+            </button>
+          </div>
+          <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={handleImport} />
+          {importError && <p style={{fontSize:11,color:'#c00',marginTop:6}}>{importError}</p>}
+          <p style={{fontSize:10,color:'var(--text3)',marginTop:8,lineHeight:1.6}}>Export saves your wardrobe as JSON. Import restores from a previous export.</p>
         </div>
       </div>
     </div>
@@ -879,7 +961,7 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete, tagGroups }) {
 }
 
 /* ── Item Add/Edit Modal ── */
-function ItemModal({ item, onSave, onClose, currentUser, tagGroups, categories }) {
+function ItemModal({ item, onSave, onClose, apiKey, cloudConfig, tagGroups, categories }) {
   const cats = categories || DEFAULT_CATEGORIES;
   const init = item || { name:'', category:cats[0]||'Top', color:'', tags:[], photo:'', purchaseLink:'' };
   const [form, setForm] = useState({ ...init, tags:Array.isArray(init.tags)?init.tags:[] });
@@ -890,9 +972,7 @@ function ItemModal({ item, onSave, onClose, currentUser, tagGroups, categories }
   const [aiError, setAiError] = useState('');
   const [aiDone, setAiDone] = useState(false);
   const fileRef = useRef();
-  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
-  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
-  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
+  const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const autoFill = async (overridePhoto) => {
@@ -925,7 +1005,7 @@ function ItemModal({ item, onSave, onClose, currentUser, tagGroups, categories }
     setUploading(true); setUploadPct(20);
     try {
       setUploadPct(50);
-      const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+      const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
       setUploadPct(100); set('photo', url);
       if(apiKey) autoFill(url);
     } catch(err) { setUploadErr(err.message||'Upload failed.'); }
@@ -934,7 +1014,7 @@ function ItemModal({ item, onSave, onClose, currentUser, tagGroups, categories }
 
   const submit = () => {
     if(!form.name.trim()) return;
-    onSave({ ...form, id:item?item.id:Date.now() });
+    onSave({ ...form });
     onClose();
   };
 
@@ -1023,14 +1103,12 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
 }
 
 /* ── Bulk Upload Modal ── */
-function BulkUploadModal({ onClose, onSave, currentUser, categories }) {
+function BulkUploadModal({ onClose, onSave, apiKey, cloudConfig, categories }) {
   const [files, setFiles] = useState([]); // [{file, preview, status, name}]
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
-  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
-  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
-  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
+  const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
 
   const addFiles = async (fileList) => {
     const images = Array.from(fileList).filter(f => f.type.startsWith('image/'));
@@ -1056,14 +1134,14 @@ function BulkUploadModal({ onClose, onSave, currentUser, categories }) {
       try {
         let photoUrl = f.preview;
         if (cloudinaryReady) {
-          photoUrl = await uploadToCloudinary(f.file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+          photoUrl = await uploadToCloudinary(f.file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
         }
         const cats = categories || DEFAULT_CATEGORIES;
         let meta = { name: f.file.name.replace(/\.[^.]+$/,''), category:cats[0]||'Other', color:'' };
         if (apiKey) {
           try { meta = await analyzeClothingImage(photoUrl, apiKey, cats); } catch {}
         }
-        const item = { id: Date.now() + i, name: meta.name||f.file.name, category: cats.includes(meta.category)?meta.category:(cats[0]||'Other'), color: meta.color||'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
+        const item = { name: meta.name||f.file.name, category: cats.includes(meta.category)?meta.category:(cats[0]||'Other'), color: meta.color||'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
         results.push(item);
         setFiles(p => p.map((x,j) => j===i ? { ...x, status:'done', name:item.name } : x));
       } catch(err) {
@@ -1138,22 +1216,19 @@ function BulkUploadModal({ onClose, onSave, currentUser, categories }) {
 }
 
 /* ── Wardrobe Tab ── */
-function WardrobeTab({ items, setItems, currentUser, categories, tagGroups }) {
+function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, apiKey, cloudConfig, categories, tagGroups }) {
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
   const [search, setSearch] = useState('');
   const [showBulk, setShowBulk] = useState(false);
 
-  // All items that pass the active filter / search
   const filtered = useMemo(() => items.filter(i => {
     if(filterCat !== 'All' && i.category !== filterCat) return false;
     if(search && ![i.name, i.brand||'', i.color||'', ...(i.tags||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   }), [items, filterCat, search]);
 
-  // Group by category (only when showing All and not searching)
-  // Each entry: { category, items[] }
   const cats = categories || DEFAULT_CATEGORIES;
   const grouped = useMemo(() => {
     const showSections = filterCat === 'All' && !search;
@@ -1163,14 +1238,13 @@ function WardrobeTab({ items, setItems, currentUser, categories, tagGroups }) {
       .filter(g => g.items.length > 0);
   }, [filtered, filterCat, search, cats]);
 
-  const saveItem = item => setItems(p => p.some(i=>i.id===item.id) ? p.map(i=>i.id===item.id?item:i) : [...p, item]);
   const handleEdit = item => { setDetail(null); setTimeout(()=>setModal(item), 80); };
-  const handleDelete = id => { setItems(p=>p.filter(i=>i.id!==id)); setDetail(null); };
+  const handleDelete = id => { onDeleteItem(id); setDetail(null); };
 
   return (
     <div className="content">
-      {modal && <ItemModal item={modal==='add'?null:modal} onSave={saveItem} onClose={()=>setModal(null)} currentUser={currentUser} tagGroups={tagGroups} categories={cats} />}
-      {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={items=>setItems(p=>[...p,...items])} currentUser={currentUser} categories={cats} />}
+      {modal && <ItemModal item={modal==='add'?null:modal} onSave={onSaveItem} onClose={()=>setModal(null)} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={cats} />}
+      {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={onSaveBulkItems} apiKey={apiKey} cloudConfig={cloudConfig} categories={cats} />}
       {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} tagGroups={tagGroups} />}
 
       {/* Toolbar */}
@@ -1220,14 +1294,13 @@ function WardrobeTab({ items, setItems, currentUser, categories, tagGroups }) {
 }
 
 /* ── Builder Tab — horizontal carousel ── */
-function BuilderTab({ items, setOutfits, currentUser, tagGroups, categories }) {
+function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
   const [selected, setSelected] = useState([]);
   const [occasions, setOccasions] = useState([]);
   const [notes, setNotes] = useState('');
   const [saved, setSaved] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
 
   const toggle = id => setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
   const selectedItems = items.filter(i=>selected.includes(i.id));
@@ -1250,9 +1323,9 @@ function BuilderTab({ items, setOutfits, currentUser, tagGroups, categories }) {
     setAiLoading(false);
   };
 
-  const saveOutfit = () => {
+  const saveOutfit = async () => {
     if(!canSave) return;
-    setOutfits(p=>[...p,{ id:Date.now(), itemIds:selected, occasions, notes }]);
+    await onSaveOutfit({ itemIds:selected, occasions, notes, wornCount:0, lastWorn:null });
     setSelected([]); setOccasions([]); setNotes('');
     setSaved(true); setTimeout(()=>setSaved(false), 2000);
   };
@@ -1344,7 +1417,7 @@ function BuilderTab({ items, setOutfits, currentUser, tagGroups, categories }) {
 }
 
 /* ── Edit Outfit Modal ── */
-function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroups, categories }) {
+function EditOutfitModal({ outfit, items, onSave, onClose, apiKey, cloudConfig, tagGroups, categories }) {
   const [selected, setSelected] = useState(outfit.itemIds||[]);
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [notes, setNotes] = useState(outfit.notes||'');
@@ -1355,9 +1428,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const photoRef = useRef(null);
-  const apiKey = localStorage.getItem(storageKey('apikey', currentUser))||'';
-  const cloudConfig = (() => { try { return JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); } catch { return {}; } })();
-  const cloudinaryReady = !!(cloudConfig.cloudName && cloudConfig.uploadPreset);
+  const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const toggle = id => setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const filtered = filterCat==='All'?items:items.filter(i=>i.category===filterCat);
   const selectedItems = items.filter(i=>selected.includes(i.id));
@@ -1368,7 +1439,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
     const localUrl = URL.createObjectURL(file);
     if(!cloudinaryReady) { setPhoto(localUrl); setUploadErr('⚠ Cloudinary not set up — photo saved locally only.'); return; }
     setUploading(true);
-    try { const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset); setPhoto(url); }
+    try { const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset); setPhoto(url); }
     catch(err) { setUploadErr('Upload failed. ' + err.message); }
     setUploading(false);
     e.target.value = '';
@@ -1465,18 +1536,11 @@ function EditOutfitModal({ outfit, items, onSave, onClose, currentUser, tagGroup
 }
 
 /* ── Outfits Tab ── */
-function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGroups, categories }) {
+function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, apiKey, cloudConfig, tagGroups, categories }) {
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  const saveEdit = updated => setOutfits(p=>p.map(o=>o.id===updated.id?updated:o));
-
-  const logWear = (outfit) => {
-    const now = new Date().toISOString();
-    setOutfits(p => p.map(o => o.id===outfit.id ? { ...o, wornCount:(o.wornCount||0)+1, lastWorn:now } : o));
-    setItems(p => p.map(i => outfit.itemIds.includes(i.id) ? { ...i, wornCount:(i.wornCount||0)+1, lastWorn:now } : i));
-  };
   const usedOccasions = useMemo(() => {
     const all = outfits.flatMap(o=>o.occasions||[]);
     const allTags = (tagGroups||DEFAULT_TAG_GROUPS).flatMap(g=>g.tags);
@@ -1489,7 +1553,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
   });
   return (
     <div className="content">
-      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={saveEdit} onClose={()=>setEditingOutfit(null)} currentUser={currentUser} tagGroups={tagGroups} categories={categories} />}
+      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={onSaveOutfit} onClose={()=>setEditingOutfit(null)} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
       {/* Toolbar */}
       <div className="toolbar">
         {usedOccasions.map(occ=>(
@@ -1522,7 +1586,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
                           </div>
                         ))}
                       </div>
-                      <button title="Log as worn today" style={{ position:'absolute', top:8, right:8, width:28, height:28, fontSize:14, fontWeight:700, background:'var(--bg)', color:'var(--text)', border:'1px solid var(--border2)', borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }} onClick={e=>{e.stopPropagation(); logWear(outfit);}}>+</button>
+                      <button title="Log as worn today" style={{ position:'absolute', top:8, right:8, width:28, height:28, fontSize:14, fontWeight:700, background:'var(--bg)', color:'var(--text)', border:'1px solid var(--border2)', borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }} onClick={e=>{e.stopPropagation(); onLogWear(outfit);}}>+</button>
                     </div>
 
                     {/* Expanded detail */}
@@ -1542,7 +1606,7 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
                         {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', fontStyle:'italic', lineHeight:1.6, marginBottom:8 }}>{outfit.notes}</p>}
                         <div style={{ display:'flex', gap:8, paddingTop:8, borderTop:'1px solid var(--border)' }}>
                           <button style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
-                          <button className="btn-danger" style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>setOutfits(p=>p.filter(o=>o.id!==outfit.id))}>Delete</button>
+                          <button className="btn-danger" style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>onDeleteOutfit(outfit.id)}>Delete</button>
                         </div>
                       </div>
                     )}
@@ -1559,46 +1623,122 @@ function OutfitsTab({ outfits, setOutfits, items, setItems, currentUser, tagGrou
 /* ── Main App (mounted after login) ── */
 function MainApp({ currentUser, onLogout }) {
   const [tab, setTab] = useState('wardrobe');
-  const [items, setItems] = useState(()=>loadState(storageKey('items', currentUser), SAMPLE_ITEMS));
-  const [outfits, setOutfits] = useState(()=>loadState(storageKey('outfits', currentUser), SAMPLE_OUTFITS));
-  const [tagGroups, setTagGroups] = useState(()=>loadState(storageKey('taggroups', currentUser), DEFAULT_TAG_GROUPS));
-  const [categories, setCategories] = useState(()=>loadState(storageKey('categories', currentUser), DEFAULT_CATEGORIES));
+  const [items, setItems] = useState([]);
+  const [outfits, setOutfits] = useState([]);
+  const [tagGroups, setTagGroups] = useState(DEFAULT_TAG_GROUPS);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [apiKey, setApiKey] = useState('');
+  const [cloudConfig, setCloudConfig] = useState({ cloudName:'', uploadPreset:'' });
+  const [hasKey, setHasKey] = useState(false);
+  const [hasCloud, setHasCloud] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [hasKey, setHasKey] = useState(()=>!!localStorage.getItem(storageKey('apikey', currentUser)));
-  const [hasCloud, setHasCloud] = useState(()=>{ try { const c=JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); return !!(c.cloudName&&c.uploadPreset); } catch { return false; } });
+  const [loading, setLoading] = useState(true);
 
-  useEffect(()=>{ try { localStorage.setItem(storageKey('items', currentUser), JSON.stringify(items)); } catch {} }, [items]);
-  useEffect(()=>{ try { localStorage.setItem(storageKey('outfits', currentUser), JSON.stringify(outfits)); } catch {} }, [outfits]);
-  useEffect(()=>{ try { localStorage.setItem(storageKey('taggroups', currentUser), JSON.stringify(tagGroups)); } catch {} }, [tagGroups]);
-  useEffect(()=>{ try { localStorage.setItem(storageKey('categories', currentUser), JSON.stringify(categories)); } catch {} }, [categories]);
+  useEffect(() => {
+    async function load() {
+      const uid = currentUser.id;
+      const [itemsRes, outfitsRes, tagRes, catRes, settingsRes] = await Promise.all([
+        db.from('items').select('*').eq('user_id', uid).order('created_at'),
+        db.from('outfits').select('*').eq('user_id', uid).order('created_at'),
+        db.from('tag_groups').select('*').eq('user_id', uid).order('sort_order'),
+        db.from('categories').select('list').eq('user_id', uid).maybeSingle(),
+        db.from('user_settings').select('*').eq('user_id', uid).maybeSingle(),
+      ]);
+      setItems((itemsRes.data||[]).map(rowToItem));
+      setOutfits((outfitsRes.data||[]).map(rowToOutfit));
+      if (tagRes.data?.length) setTagGroups(tagRes.data);
+      if (catRes.data?.list) setCategories(catRes.data.list);
+      const s = settingsRes.data;
+      const ak = s?.api_key||''; const cc = { cloudName:s?.cloud_name||'', uploadPreset:s?.upload_preset||'' };
+      setApiKey(ak); setCloudConfig(cc); setHasKey(!!ak); setHasCloud(!!(cc.cloudName&&cc.uploadPreset));
+      setLoading(false);
+    }
+    load();
+  }, [currentUser.id]);
 
-  const onSettingsClose = () => {
-    setShowSettings(false);
-    setHasKey(!!localStorage.getItem(storageKey('apikey', currentUser)));
-    try { const c=JSON.parse(localStorage.getItem(storageKey('cloudinary', currentUser))||'{}'); setHasCloud(!!(c.cloudName&&c.uploadPreset)); } catch {}
+  // ── Centralized write handlers ────────────────────────────
+  const handleSaveItem = async (formData) => {
+    if (formData.id) {
+      const { data:row } = await db.from('items').update(itemToRow(formData, currentUser.id)).eq('id', formData.id).select().single();
+      if (row) setItems(p => p.map(i => i.id===row.id ? rowToItem(row) : i));
+    } else {
+      const { data:row } = await db.from('items').insert(itemToRow(formData, currentUser.id)).select().single();
+      if (row) setItems(p => [...p, rowToItem(row)]);
+    }
+  };
+  const handleDeleteItem = async (id) => {
+    await db.from('items').delete().eq('id', id);
+    setItems(p => p.filter(i => i.id !== id));
+  };
+  const handleSaveBulkItems = async (newItems) => {
+    const { data:rows } = await db.from('items').insert(newItems.map(item => itemToRow(item, currentUser.id))).select();
+    if (rows) setItems(p => [...p, ...rows.map(rowToItem)]);
+  };
+  const handleSaveOutfit = async (formData) => {
+    if (formData.id) {
+      const { data:row } = await db.from('outfits').update(outfitToRow(formData, currentUser.id)).eq('id', formData.id).select().single();
+      if (row) setOutfits(p => p.map(o => o.id===row.id ? rowToOutfit(row) : o));
+    } else {
+      const { data:row } = await db.from('outfits').insert(outfitToRow(formData, currentUser.id)).select().single();
+      if (row) setOutfits(p => [...p, rowToOutfit(row)]);
+    }
+  };
+  const handleDeleteOutfit = async (id) => {
+    await db.from('outfits').delete().eq('id', id);
+    setOutfits(p => p.filter(o => o.id !== id));
+  };
+  const handleLogWear = async (outfit) => {
+    const now = new Date().toISOString();
+    const newCount = (outfit.wornCount||0) + 1;
+    await db.from('outfits').update({ worn_count:newCount, last_worn:now }).eq('id', outfit.id);
+    setOutfits(p => p.map(o => o.id===outfit.id ? {...o, wornCount:newCount, lastWorn:now} : o));
+    const toUpdate = items.filter(i => outfit.itemIds.includes(i.id));
+    await Promise.all(toUpdate.map(i => db.from('items').update({ worn_count:(i.wornCount||0)+1, last_worn:now }).eq('id', i.id)));
+    setItems(p => p.map(i => outfit.itemIds.includes(i.id) ? {...i, wornCount:(i.wornCount||0)+1, lastWorn:now} : i));
+  };
+  const handleSetTagGroups = async (updated) => {
+    setTagGroups(updated);
+    await db.from('tag_groups').delete().eq('user_id', currentUser.id);
+    if (updated.length) await db.from('tag_groups').insert(updated.map((g,i) => ({ user_id:currentUser.id, name:g.name, tags:g.tags, sort_order:i })));
+  };
+  const handleSetCategories = async (updated) => {
+    setCategories(updated);
+    await db.from('categories').upsert({ user_id:currentUser.id, list:updated });
+  };
+  const handleSettingsSaved = ({ apiKey:ak, cloudConfig:cc }) => {
+    if (ak !== undefined) { setApiKey(ak); setHasKey(!!ak); }
+    if (cc !== undefined) { setCloudConfig(cc); setHasCloud(!!(cc.cloudName&&cc.uploadPreset)); }
   };
 
-  const TABS = [
-    { id:'wardrobe', label:'Wardrobe' },
-    { id:'builder',  label:'Builder' },
-    { id:'outfits',  label:'Outfits' },
-  ];
+  const TABS = [{ id:'wardrobe', label:'Wardrobe' }, { id:'builder', label:'Builder' }, { id:'outfits', label:'Outfits' }];
+  const displayName = currentUser.email.replace('@lookbook.local','');
+
+  if (loading) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg3)' }}>
+      <span className="spinner" style={{ width:18, height:18, borderWidth:3, borderColor:'var(--text3)', borderTopColor:'transparent' }} />
+    </div>
+  );
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>
-      {showSettings && <SettingsModal onClose={onSettingsClose} currentUser={currentUser} tagGroups={tagGroups} setTagGroups={setTagGroups} categories={categories} setCategories={setCategories} />}
+      {showSettings && <SettingsModal
+        onClose={()=>setShowSettings(false)} currentUser={currentUser}
+        apiKey={apiKey} cloudConfig={cloudConfig}
+        tagGroups={tagGroups} setTagGroups={handleSetTagGroups}
+        categories={categories} setCategories={handleSetCategories}
+        onSettingsSaved={handleSettingsSaved}
+        items={items} outfits={outfits}
+      />}
 
       {/* Top nav */}
       <div className="top-nav">
         <div className="nav-tabs">
           {TABS.map(t => (
-            <button key={t.id} className={`nav-tab${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
-              {t.label}
-            </button>
+            <button key={t.id} className={`nav-tab${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>
           ))}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <span style={{ fontSize:11, color:'var(--text3)', letterSpacing:'0.02em' }}>{currentUser}</span>
+          <span style={{ fontSize:11, color:'var(--text3)', letterSpacing:'0.02em' }}>{displayName}</span>
           <button className="settings-btn" onClick={()=>setShowSettings(true)}>
             ⚙
             {hasCloud && <span className="settings-badge" style={{ color:'#39a855' }}>CDN</span>}
@@ -1608,7 +1748,7 @@ function MainApp({ currentUser, onLogout }) {
         </div>
       </div>
 
-      {/* Banners (only if nothing set up) */}
+      {/* Banners */}
       {(!hasCloud || !hasKey) && (
         <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
           {!hasCloud && (
@@ -1625,30 +1765,45 @@ function MainApp({ currentUser, onLogout }) {
       )}
 
       {/* Tab content */}
-      {tab==='wardrobe' && <WardrobeTab items={items} setItems={setItems} currentUser={currentUser} categories={categories} tagGroups={tagGroups} />}
-      {tab==='builder'  && <BuilderTab  items={items} setOutfits={setOutfits} currentUser={currentUser} tagGroups={tagGroups} categories={categories} />}
-      {tab==='outfits'  && <OutfitsTab  outfits={outfits} setOutfits={setOutfits} items={items} setItems={setItems} currentUser={currentUser} tagGroups={tagGroups} categories={categories} />}
+      {tab==='wardrobe' && <WardrobeTab items={items} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} apiKey={apiKey} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
+      {tab==='builder'  && <BuilderTab  items={items} onSaveOutfit={handleSaveOutfit} apiKey={apiKey} tagGroups={tagGroups} categories={categories} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} onSaveOutfit={handleSaveOutfit} onDeleteOutfit={handleDeleteOutfit} onLogWear={handleLogWear} items={items} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
     </div>
   );
 }
 
 /* ── App Shell ── */
 function App() {
-  const [currentUser, setCurrentUser] = useState(() => sessionStorage.getItem(SK_CURRENT_USER));
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem(SK_CURRENT_USER);
+  useEffect(() => {
+    db.auth.getSession().then(({ data:{ session } }) => {
+      setCurrentUser(session?.user || null);
+      setLoading(false);
+    });
+  }, []);
+
+  const handleLogout = async () => {
+    await db.auth.signOut();
     setCurrentUser(null);
   };
 
-  if (!currentUser) {
-    return <LoginScreen onLogin={u => setCurrentUser(u)} />;
-  }
+  if (loading) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg3)' }}>
+      <span className="spinner" style={{ width:18, height:18, borderWidth:3, borderColor:'var(--text3)', borderTopColor:'transparent' }} />
+    </div>
+  );
 
-  return <MainApp key={currentUser} currentUser={currentUser} onLogout={handleLogout} />;
+  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+  return <MainApp key={currentUser.id} currentUser={currentUser} onLogout={handleLogout} />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/service-worker.js');
+}
 </script>
 </body>
 </html>
