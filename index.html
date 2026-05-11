@@ -558,13 +558,14 @@ async function uploadToCloudinary(file, cloudName, uploadPreset) {
   return (await res.json()).secure_url;
 }
 
-async function analyzeClothingImage(photoUrl, apiKey, categories = DEFAULT_CATEGORIES) {
+async function analyzeClothingImage(photoUrl, categories = DEFAULT_CATEGORIES) {
+  const { data:{ session } } = await db.auth.getSession();
   const imageSource = photoUrl.startsWith('http')
     ? { type:'url', url:photoUrl }
     : { type:'base64', media_type:photoUrl.split(';')[0].split(':')[1]||'image/jpeg', data:photoUrl.split(',')[1] };
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-proxy`, {
     method:'POST',
-    headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${session?.access_token}` },
     body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:300, messages:[{ role:'user', content:[
       { type:'image', source:imageSource },
       { type:'text', text:`Analyze this clothing item. Reply ONLY with a valid JSON object, no markdown:\n{"name":"short descriptive name","category":"one of: ${categories.join(' ')}","color":"pick the single closest color from this list: ${COLOR_DICT.join(', ')}"}` }
@@ -575,7 +576,8 @@ async function analyzeClothingImage(photoUrl, apiKey, categories = DEFAULT_CATEG
   return JSON.parse((data.content?.find(b=>b.type==='text')?.text||'').replace(/```json|```/g,'').trim());
 }
 
-async function suggestOutfitOccasions(selectedItems, apiKey, tagGroups) {
+async function suggestOutfitOccasions(selectedItems, tagGroups) {
+  const { data:{ session } } = await db.auth.getSession();
   const contentBlocks = [];
   for (const item of selectedItems) {
     if (item.photo) {
@@ -590,9 +592,9 @@ async function suggestOutfitOccasions(selectedItems, apiKey, tagGroups) {
   const groupsDesc = groups.map(g => `${g.name}: ${g.tags.join(', ')}`).join('\n');
   const exampleTag = groups[0]?.tags[0] || '💼 Work';
   contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 tags from the groups below. Reply ONLY with a JSON array.\n${groupsDesc}\nExample: ["${exampleTag}"]` });
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-proxy`, {
     method:'POST',
-    headers:{ 'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true' },
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${session?.access_token}` },
     body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:150, messages:[{ role:'user', content:contentBlocks }]})
   });
   if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
@@ -730,12 +732,7 @@ function LoginScreen({ onLogin }) {
 }
 
 /* ── Settings Modal ── */
-function SettingsModal({ onClose, currentUser, apiKey: initKey, cloudConfig: initCloud, tagGroups, setTagGroups, categories, setCategories, onSettingsSaved, items, outfits }) {
-  const [key, setKey] = useState(initKey||'');
-  const [saved, setSaved] = useState(false);
-  const [cloudName, setCloudName] = useState(initCloud?.cloudName||'');
-  const [uploadPreset, setUploadPreset] = useState(initCloud?.uploadPreset||'');
-  const [cloudSaved, setCloudSaved] = useState(false);
+function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categories, setCategories, onSettingsSaved, items, outfits }) {
   const [importing, setImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
   const [importError, setImportError] = useState('');
@@ -767,25 +764,6 @@ function SettingsModal({ onClose, currentUser, apiKey: initKey, cloudConfig: ini
     setNewGroupName('');
   };
 
-  const saveApiKey = async () => {
-    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key.trim(), cloud_name:cloudName||null, upload_preset:uploadPreset||null });
-    onSettingsSaved({ apiKey: key.trim() });
-    setSaved(true); setTimeout(()=>setSaved(false),1500);
-  };
-  const removeApiKey = async () => {
-    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:null, cloud_name:cloudName||null, upload_preset:uploadPreset||null });
-    setKey(''); onSettingsSaved({ apiKey: '' });
-  };
-  const saveCloudinary = async () => {
-    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key||null, cloud_name:cloudName.trim(), upload_preset:uploadPreset.trim() });
-    onSettingsSaved({ cloudConfig:{ cloudName:cloudName.trim(), uploadPreset:uploadPreset.trim() } });
-    setCloudSaved(true); setTimeout(()=>{ setCloudSaved(false); onClose(); }, 900);
-  };
-  const removeCloudinary = async () => {
-    await db.from('user_settings').upsert({ user_id:currentUser.id, api_key:key||null, cloud_name:null, upload_preset:null });
-    setCloudName(''); setUploadPreset('');
-    onSettingsSaved({ cloudConfig:{ cloudName:'', uploadPreset:'' } });
-  };
   const handleExport = () => {
     const data = { version:1, exportedAt:new Date().toISOString(), exportedBy:currentUser.email.split('@')[0], items, outfits, tagGroups:groups, categories:cats };
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
@@ -944,7 +922,7 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete, tagGroups }) {
 }
 
 /* ── Item Add/Edit Modal ── */
-function ItemModal({ item, onSave, onClose, apiKey, cloudConfig, tagGroups, categories }) {
+function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }) {
   const cats = categories || DEFAULT_CATEGORIES;
   const init = item || { name:'', category:cats[0]||'Top', color:'', tags:[], photo:'', purchaseLink:'' };
   const [form, setForm] = useState({ ...init, tags:Array.isArray(init.tags)?init.tags:[] });
@@ -960,22 +938,22 @@ function ItemModal({ item, onSave, onClose, apiKey, cloudConfig, tagGroups, cate
 
   const autoFill = async (overridePhoto) => {
     const photo = overridePhoto || form.photo;
-    if(!photo||!apiKey) return;
+    if(!photo) return;
     setAnalyzing(true); setAiError(''); setAiDone(false);
     try {
-      const r = await analyzeClothingImage(photo, apiKey, cats);
+      const r = await analyzeClothingImage(photo, cats);
       const catFinal = cats.includes(r.category) ? r.category : form.category;
       const updates = { name:r.name||form.name, category:catFinal, color:r.color||form.color };
       let tags = form.tags;
       if (tagGroups?.length) {
         try {
           const tempItem = { name:updates.name, category:catFinal, color:updates.color, photo };
-          tags = await suggestOutfitOccasions([tempItem], apiKey, tagGroups);
+          tags = await suggestOutfitOccasions([tempItem], tagGroups);
         } catch {}
       }
       setForm(f=>({ ...f, ...updates, tags }));
       setAiDone(true);
-    } catch(err) { setAiError('AI analysis failed. Check your API key in Settings.'); }
+    } catch(err) { setAiError('AI analysis failed. Please try again.'); }
     setAnalyzing(false);
   };
 
@@ -984,13 +962,13 @@ function ItemModal({ item, onSave, onClose, apiKey, cloudConfig, tagGroups, cate
     setUploadErr(''); setAiDone(false);
     const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
     set('photo', localPreview);
-    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); if(apiKey) autoFill(localPreview); return; }
+    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); autoFill(localPreview); return; }
     setUploading(true); setUploadPct(20);
     try {
       setUploadPct(50);
       const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
       setUploadPct(100); set('photo', url);
-      if(apiKey) autoFill(url);
+      autoFill(url);
     } catch(err) { setUploadErr(err.message||'Upload failed.'); }
     setUploading(false); setUploadPct(0);
   };
@@ -1022,7 +1000,7 @@ function ItemModal({ item, onSave, onClose, apiKey, cloudConfig, tagGroups, cate
                 {uploading ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</> : form.photo ? '📷 Change photo' : '📷 Upload photo'}
               </button>
               {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
-              {form.photo && apiKey && (
+              {form.photo && (
                 <button className="btn-ai" onClick={()=>autoFill()} disabled={analyzing||uploading}>
                   {analyzing ? <><span className="spinner"/>Analyzing…</> : aiDone ? '✓ Auto-filled · ↺ Re-analyze' : '↺ Re-analyze'}
                 </button>
@@ -1086,7 +1064,7 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
 }
 
 /* ── Bulk Upload Modal ── */
-function BulkUploadModal({ onClose, onSave, apiKey, cloudConfig, categories }) {
+function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
   const [files, setFiles] = useState([]); // [{file, preview, status, name}]
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -1121,9 +1099,7 @@ function BulkUploadModal({ onClose, onSave, apiKey, cloudConfig, categories }) {
         }
         const cats = categories || DEFAULT_CATEGORIES;
         let meta = { name: f.file.name.replace(/\.[^.]+$/,''), category:cats[0]||'Other', color:'' };
-        if (apiKey) {
-          try { meta = await analyzeClothingImage(photoUrl, apiKey, cats); } catch {}
-        }
+        try { meta = await analyzeClothingImage(photoUrl, cats); } catch {}
         const item = { name: meta.name||f.file.name, category: cats.includes(meta.category)?meta.category:(cats[0]||'Other'), color: meta.color||'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
         results.push(item);
         setFiles(p => p.map((x,j) => j===i ? { ...x, status:'done', name:item.name } : x));
@@ -1150,9 +1126,6 @@ function BulkUploadModal({ onClose, onSave, apiKey, cloudConfig, categories }) {
 
         {!cloudinaryReady && (
           <div className="ai-banner" style={{ marginBottom:12 }}>⚠ Cloudinary not set up — photos will be saved locally only.</div>
-        )}
-        {!apiKey && (
-          <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10, lineHeight:1.6 }}>No API key set — items will be saved without AI analysis. Add your key in Settings.</div>
         )}
 
         <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={e=>addFiles(e.target.files)} />
@@ -1199,7 +1172,7 @@ function BulkUploadModal({ onClose, onSave, apiKey, cloudConfig, categories }) {
 }
 
 /* ── Wardrobe Tab ── */
-function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, apiKey, cloudConfig, categories, tagGroups }) {
+function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudConfig, categories, tagGroups }) {
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
@@ -1226,8 +1199,8 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, apiKey,
 
   return (
     <div className="content">
-      {modal && <ItemModal item={modal==='add'?null:modal} onSave={onSaveItem} onClose={()=>setModal(null)} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={cats} />}
-      {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={onSaveBulkItems} apiKey={apiKey} cloudConfig={cloudConfig} categories={cats} />}
+      {modal && <ItemModal item={modal==='add'?null:modal} onSave={onSaveItem} onClose={()=>setModal(null)} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={cats} />}
+      {showBulk && <BulkUploadModal onClose={()=>setShowBulk(false)} onSave={onSaveBulkItems} cloudConfig={cloudConfig} categories={cats} />}
       {detail && <ItemDetailModal item={detail} onClose={()=>setDetail(null)} onEdit={handleEdit} onDelete={handleDelete} tagGroups={tagGroups} />}
 
       {/* Toolbar */}
@@ -1277,7 +1250,7 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, apiKey,
 }
 
 /* ── Builder Tab — horizontal carousel ── */
-function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
+function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
   const [selected, setSelected] = useState([]);
   const [occasions, setOccasions] = useState([]);
   const [notes, setNotes] = useState('');
@@ -1299,10 +1272,10 @@ function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
   );
 
   const suggestOcc = async () => {
-    if(!selectedItems.length||!apiKey) return;
+    if(!selectedItems.length) return;
     setAiLoading(true); setAiError('');
-    try { const s = await suggestOutfitOccasions(selectedItems, apiKey, tagGroups); setOccasions(s); }
-    catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
+    try { const s = await suggestOutfitOccasions(selectedItems, tagGroups); setOccasions(s); }
+    catch(e) { setAiError('Could not suggest occasions. Please try again.'); }
     setAiLoading(false);
   };
 
@@ -1375,7 +1348,7 @@ function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
         )}
 
         <div className="form-row">
-          {apiKey && selectedItems.length > 0 && (
+          {selectedItems.length > 0 && (
             <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:7 }}>
               <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>
                 {aiLoading ? <><span className="spinner"/>…</> : '✨ AI suggest'}
@@ -1384,7 +1357,6 @@ function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
           )}
           <OccasionPicker selected={occasions} onChange={setOccasions} tagGroups={tagGroups} />
           {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:5 }}>{aiError}</p>}
-          {!apiKey && <p style={{ fontSize:10, color:'var(--text3)', marginTop:5 }}>Add API key in Settings for AI suggestions.</p>}
         </div>
         <div className="form-row">
           <label>Notes</label>
@@ -1400,7 +1372,7 @@ function BuilderTab({ items, onSaveOutfit, apiKey, tagGroups, categories }) {
 }
 
 /* ── Edit Outfit Modal ── */
-function EditOutfitModal({ outfit, items, onSave, onClose, apiKey, cloudConfig, tagGroups, categories }) {
+function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroups, categories }) {
   const [selected, setSelected] = useState(outfit.itemIds||[]);
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [notes, setNotes] = useState(outfit.notes||'');
@@ -1428,10 +1400,10 @@ function EditOutfitModal({ outfit, items, onSave, onClose, apiKey, cloudConfig, 
     e.target.value = '';
   };
   const suggestOcc = async () => {
-    if(!selectedItems.length||!apiKey) return;
+    if(!selectedItems.length) return;
     setAiLoading(true); setAiError('');
-    try { setOccasions(await suggestOutfitOccasions(selectedItems, apiKey, tagGroups)); }
-    catch(e) { setAiError('Could not suggest. Check API key in Settings.'); }
+    try { setOccasions(await suggestOutfitOccasions(selectedItems, tagGroups)); }
+    catch(e) { setAiError('Could not suggest occasions. Please try again.'); }
     setAiLoading(false);
   };
   const submit = () => {
@@ -1493,7 +1465,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, apiKey, cloudConfig, 
                 {uploadErr && <p style={{ fontSize:10, color:'#c00', marginTop:3 }}>{uploadErr}</p>}
               </div>
               <div className="form-row">
-                {apiKey && selectedItems.length>0 && (
+                {selectedItems.length>0 && (
                   <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:6 }}>
                     <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>{aiLoading?<><span className="spinner"/>…</>:'✨ AI'}</button>
                   </div>
@@ -1519,7 +1491,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, apiKey, cloudConfig, 
 }
 
 /* ── Outfits Tab ── */
-function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, apiKey, cloudConfig, tagGroups, categories }) {
+function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, cloudConfig, tagGroups, categories }) {
   const [search, setSearch] = useState('');
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
@@ -1536,7 +1508,7 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, a
   });
   return (
     <div className="content">
-      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={onSaveOutfit} onClose={()=>setEditingOutfit(null)} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
+      {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={onSaveOutfit} onClose={()=>setEditingOutfit(null)} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
       {/* Toolbar */}
       <div className="toolbar">
         {usedOccasions.map(occ=>(
@@ -1610,10 +1582,8 @@ function MainApp({ currentUser, onLogout }) {
   const [outfits, setOutfits] = useState([]);
   const [tagGroups, setTagGroups] = useState(DEFAULT_TAG_GROUPS);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
-  const [apiKey, setApiKey] = useState('');
-  const [cloudConfig, setCloudConfig] = useState({ cloudName:CLOUD_NAME, uploadPreset:UPLOAD_PRESET });
-  const [hasKey, setHasKey] = useState(false);
-  const [hasCloud, setHasCloud] = useState(true);
+  const [cloudConfig] = useState({ cloudName:CLOUD_NAME, uploadPreset:UPLOAD_PRESET });
+  const [hasCloud] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -1638,8 +1608,6 @@ function MainApp({ currentUser, onLogout }) {
       if (tagRes.data?.length) setTagGroups(tagRes.data);
       if (catRes.data?.list) setCategories(catRes.data.list);
       const s = settingsRes.data;
-      const ak = s?.api_key||'';
-      setApiKey(ak); setHasKey(!!ak);
       setLoading(false);
     }
     load();
@@ -1694,10 +1662,7 @@ function MainApp({ currentUser, onLogout }) {
     setCategories(updated);
     await db.from('categories').upsert({ user_id:currentUser.id, list:updated });
   };
-  const handleSettingsSaved = ({ apiKey:ak, cloudConfig:cc }) => {
-    if (ak !== undefined) { setApiKey(ak); setHasKey(!!ak); }
-    if (cc !== undefined) { setCloudConfig(cc); setHasCloud(!!(cc.cloudName&&cc.uploadPreset)); }
-  };
+  const handleSettingsSaved = () => {};
 
   const TABS = [{ id:'wardrobe', label:'Wardrobe' }, { id:'builder', label:'Builder' }, { id:'outfits', label:'Outfits' }];
   const displayName = currentUser.email.split('@')[0];
@@ -1712,7 +1677,6 @@ function MainApp({ currentUser, onLogout }) {
     <div style={{ background:'var(--bg)', minHeight:'100vh', borderLeft:'1px solid var(--border)', borderRight:'1px solid var(--border)' }}>
       {showSettings && <SettingsModal
         onClose={()=>setShowSettings(false)} currentUser={currentUser}
-        apiKey={apiKey} cloudConfig={cloudConfig}
         tagGroups={tagGroups} setTagGroups={handleSetTagGroups}
         categories={categories} setCategories={handleSetCategories}
         onSettingsSaved={handleSettingsSaved}
@@ -1728,11 +1692,7 @@ function MainApp({ currentUser, onLogout }) {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:11, color:'var(--text3)', letterSpacing:'0.02em' }}>{displayName}</span>
-          <button className="settings-btn" onClick={()=>setShowSettings(true)}>
-            ⚙
-            {hasCloud && <span className="settings-badge" style={{ color:'#39a855' }}>CDN</span>}
-            {hasKey   && <span className="settings-badge" style={{ color:'var(--accent)' }}>AI</span>}
-          </button>
+          <button className="settings-btn" onClick={()=>setShowSettings(true)}>⚙</button>
           <button style={{ padding:'4px 10px', fontSize:11, color:'var(--text3)', border:'1px solid var(--border2)', borderRadius:'var(--radius)' }} onClick={onLogout}>Sign out</button>
         </div>
       </div>
@@ -1740,9 +1700,9 @@ function MainApp({ currentUser, onLogout }) {
       {/* Banners */}
 
       {/* Tab content */}
-      {tab==='wardrobe' && <WardrobeTab items={items} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} apiKey={apiKey} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
-      {tab==='builder'  && <BuilderTab  items={items} onSaveOutfit={handleSaveOutfit} apiKey={apiKey} tagGroups={tagGroups} categories={categories} />}
-      {tab==='outfits'  && <OutfitsTab  outfits={outfits} onSaveOutfit={handleSaveOutfit} onDeleteOutfit={handleDeleteOutfit} onLogWear={handleLogWear} items={items} apiKey={apiKey} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
+      {tab==='wardrobe' && <WardrobeTab items={items} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
+      {tab==='builder'  && <BuilderTab  items={items} onSaveOutfit={handleSaveOutfit} tagGroups={tagGroups} categories={categories} />}
+      {tab==='outfits'  && <OutfitsTab  outfits={outfits} onSaveOutfit={handleSaveOutfit} onDeleteOutfit={handleDeleteOutfit} onLogWear={handleLogWear} items={items} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
     </div>
   );
 }
