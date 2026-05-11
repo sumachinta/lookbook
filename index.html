@@ -930,6 +930,25 @@ function ItemDetailModal({ item, onClose, onEdit, onDelete, tagGroups }) {
   );
 }
 
+/* ── Image resize utility ── */
+const resizeImageFile = (file, maxDim = 800) => new Promise(resolve => {
+  const img = new Image();
+  const blobUrl = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(blobUrl);
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    canvas.toBlob(blob => {
+      resolve(new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.85);
+  };
+  img.src = blobUrl;
+});
+
 /* ── Item Add/Edit Modal ── */
 function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }) {
   const cats = categories || DEFAULT_CATEGORIES;
@@ -970,8 +989,11 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
   };
 
   const handleFile = async e => {
-    const file = e.target.files[0]; if(!file) return;
+    const rawFile = e.target.files[0]; if(!rawFile) return;
     setUploadErr(''); setAiDone(false); setBgError('');
+
+    // Resize to max 800px before BG removal or upload (fixes WASM memory limits, saves storage)
+    const file = await resizeImageFile(rawFile, 800);
 
     // Step A: immediate local preview
     const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
@@ -1596,8 +1618,9 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
   const selectedItems = items.filter(i=>selected.includes(i.id));
   const canSave = selected.length>=2 && occasions.length>0;
   const handleOutfitPhoto = async e => {
-    const file = e.target.files?.[0]; if(!file) return;
+    const rawFile = e.target.files?.[0]; if(!rawFile) return;
     setUploadErr('');
+    const file = await resizeImageFile(rawFile, 800);
     const localUrl = URL.createObjectURL(file);
     if(!cloudinaryReady) { setPhoto(localUrl); setUploadErr('⚠ Cloudinary not set up — photo saved locally only.'); return; }
     setUploading(true);
