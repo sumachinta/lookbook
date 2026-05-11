@@ -976,12 +976,9 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
     let fileForUpload = file;
     let transparentBlobUrl = null;
     try {
-      const { removeBackground } = await import(
-        'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/browser/index.js'
-      );
+      const { removeBackground } = await import('https://esm.sh/@imgly/background-removal@1.4.5');
       setBgPhase('inference');
       const resultBlob = await removeBackground(file, {
-        publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/browser/',
         progress: (key) => { setBgPhase(key.startsWith('fetch') ? 'model' : 'inference'); }
       });
       fileForUpload = new File([resultBlob], 'item.png', { type: 'image/png' });
