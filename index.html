@@ -17,6 +17,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 :root {
   --bg: #faf9f7;
@@ -449,7 +450,7 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useMemo, useEffect, useRef } = React;
+const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 // ── Supabase ─────────────────────────────────────────────────
 // Fill in your project URL and anon key from supabase.com → Project Settings → API
@@ -932,6 +933,9 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
   const [analyzing, setAnalyzing] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiDone, setAiDone] = useState(false);
+  const [bgRemoving, setBgRemoving] = useState(false);
+  const [bgPhase, setBgPhase] = useState('');
+  const [bgError, setBgError] = useState('');
   const fileRef = useRef();
   const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
@@ -959,15 +963,43 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
 
   const handleFile = async e => {
     const file = e.target.files[0]; if(!file) return;
-    setUploadErr(''); setAiDone(false);
+    setUploadErr(''); setAiDone(false); setBgError('');
+
+    // Step A: immediate local preview
     const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
     set('photo', localPreview);
+
     if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); autoFill(localPreview); return; }
+
+    // Step B: background removal (browser WASM, free)
+    setBgRemoving(true); setBgPhase('model');
+    let fileForUpload = file;
+    let transparentBlobUrl = null;
+    try {
+      const { removeBackground } = await import(
+        'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/browser/index.js'
+      );
+      setBgPhase('inference');
+      const resultBlob = await removeBackground(file, {
+        publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/browser/',
+        progress: (key) => { setBgPhase(key.startsWith('fetch') ? 'model' : 'inference'); }
+      });
+      fileForUpload = new File([resultBlob], 'item.png', { type: 'image/png' });
+      transparentBlobUrl = URL.createObjectURL(resultBlob);
+      set('photo', transparentBlobUrl);
+    } catch {
+      setBgError('Background removal failed — uploading original photo.');
+    }
+    setBgRemoving(false); setBgPhase('');
+
+    // Step C: upload (transparent PNG or original fallback)
     setUploading(true); setUploadPct(20);
     try {
       setUploadPct(50);
-      const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
-      setUploadPct(100); set('photo', url);
+      const url = await uploadToCloudinary(fileForUpload, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
+      setUploadPct(100);
+      set('photo', url);
+      if(transparentBlobUrl) URL.revokeObjectURL(transparentBlobUrl);
       autoFill(url);
     } catch(err) { setUploadErr(err.message||'Upload failed.'); }
     setUploading(false); setUploadPct(0);
@@ -996,8 +1028,12 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
               {uploading && <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}><span className="spinner" style={{ borderColor:'#fff', borderTopColor:'transparent' }}/></div>}
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
-              <button onClick={()=>fileRef.current.click()} disabled={uploading}>
-                {uploading ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</> : form.photo ? '📷 Change photo' : '📷 Upload photo'}
+              <button onClick={()=>fileRef.current.click()} disabled={bgRemoving||uploading}>
+                {bgRemoving
+                  ? <><span className="spinner"/>{bgPhase==='model'?'Downloading AI model…':'Removing background…'}</>
+                  : uploading
+                    ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</>
+                    : form.photo ? '📷 Change photo' : '📷 Upload photo'}
               </button>
               {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
               {form.photo && (
@@ -1006,6 +1042,7 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
                 </button>
               )}
               {uploadErr && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{uploadErr}</p>}
+              {bgError && <p style={{ fontSize:10, color:'#c03030', marginTop:4, lineHeight:1.5 }}>{bgError}</p>}
               {aiError && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{aiError}</p>}
               {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setAiDone(false); setUploadErr(''); }}>Remove photo</button>}
               {form.photo && form.photo.startsWith('http') && <p style={{ fontSize:10, color:'#39a855' }}>☁ On Cloudinary CDN</p>}
@@ -1371,6 +1408,166 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
   );
 }
 
+/* ── Outfit Collage Modal ── */
+const COLLAGE_W = 500, COLLAGE_H = 650;
+const PLACEMENT_MAP = {
+  Outerwear: { w:200, h:270, x:100, y:60 },
+  Top:       { w:190, h:220, x:260, y:80 },
+  Bottom:    { w:175, h:270, x:260, y:300 },
+  Shoes:     { w:200, h:150, x:40,  y:470 },
+  Dress:     { w:200, h:380, x:200, y:60 },
+  Accessory: { w:175, h:175, x:30,  y:150 },
+  Other:     { w:150, h:150, x:30,  y:150 },
+};
+
+function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
+  const [placements, setPlacements] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x:0, y:0 });
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState('');
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const outfitItems = items.filter(i => (outfit.itemIds||[]).includes(i.id) && i.photo);
+    let accY = 0;
+    setPlacements(outfitItems.map(item => {
+      const base = PLACEMENT_MAP[item.category] || { w:150, h:150, x:30, y:30 };
+      let p = { itemId: item.id, ...base };
+      if(item.category === 'Accessory' || item.category === 'Other') {
+        p = { ...p, y: base.y + accY };
+        accY += base.h + 10;
+      }
+      return p;
+    }));
+  }, []);
+
+  const handlePointerDown = (e, itemId) => {
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    const p = placements.find(pl => pl.itemId === itemId);
+    if(!p) return;
+    setActiveId(itemId);
+    setDragOffset({ x: (e.clientX - rect.left) - p.x, y: (e.clientY - rect.top) - p.y });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if(!activeId) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const p = placements.find(pl => pl.itemId === activeId);
+    if(!p) return;
+    const x = Math.max(0, Math.min(COLLAGE_W - p.w, (e.clientX - rect.left) - dragOffset.x));
+    const y = Math.max(0, Math.min(COLLAGE_H - p.h, (e.clientY - rect.top) - dragOffset.y));
+    setPlacements(prev => prev.map(pl => pl.itemId === activeId ? { ...pl, x, y } : pl));
+  };
+
+  const handlePointerUp = () => setActiveId(null);
+
+  const handleExport = async () => {
+    setExporting(true); setExportErr('');
+    try {
+      const imgEls = Array.from(canvasRef.current.querySelectorAll('img'));
+      const originalSrcs = imgEls.map(el => el.src);
+      const blobUrls = await Promise.all(imgEls.map(async el => {
+        try {
+          const resp = await fetch(el.src, { mode: 'cors' });
+          return URL.createObjectURL(await resp.blob());
+        } catch { return el.src; }
+      }));
+      imgEls.forEach((el, i) => { el.src = blobUrls[i]; });
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const canvas = await window.html2canvas(canvasRef.current, {
+        width: COLLAGE_W, height: COLLAGE_H, scale: 2,
+        useCORS: true, allowTaint: false, backgroundColor: '#f8f8f5',
+      });
+
+      imgEls.forEach((el, i) => { el.src = originalSrcs[i]; });
+      blobUrls.forEach(u => { if(u.startsWith('blob:')) URL.revokeObjectURL(u); });
+
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      const file = new File([blob], `collage-${Date.now()}.png`, { type: 'image/png' });
+      const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+      onSave(url);
+      onClose();
+    } catch(err) {
+      setExportErr('Export failed: ' + (err.message || 'unknown error'));
+    }
+    setExporting(false);
+  };
+
+  return (
+    <div className="overlay" onClick={onClose} style={{ zIndex: 400 }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--bg)', borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border2)', width: 'min(580px,96vw)',
+        maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 25px 80px rgba(0,0,0,0.3)', animation: 'slideUp 0.2s ease'
+      }}>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <p style={{ fontWeight: 600, fontSize: 14 }}>Create collage</p>
+          <button style={{ border: 'none', padding: '4px 8px', fontSize: 16 }} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, alignSelf: 'flex-start' }}>Drag items to arrange your outfit board</p>
+          <div
+            ref={canvasRef}
+            style={{
+              width: COLLAGE_W, height: COLLAGE_H,
+              background: '#f8f8f5',
+              position: 'relative',
+              border: '1px solid var(--border)',
+              borderRadius: 4,
+              overflow: 'hidden',
+              cursor: activeId ? 'grabbing' : 'default',
+              touchAction: 'none',
+              flexShrink: 0,
+            }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            {placements.map(p => {
+              const item = items.find(i => i.id === p.itemId);
+              if(!item?.photo) return null;
+              return (
+                <img
+                  key={p.itemId}
+                  src={item.photo}
+                  alt={item.name}
+                  draggable={false}
+                  onPointerDown={e => handlePointerDown(e, p.itemId)}
+                  style={{
+                    position: 'absolute',
+                    left: p.x, top: p.y,
+                    width: p.w, height: p.h,
+                    objectFit: 'contain',
+                    cursor: 'grab',
+                    userSelect: 'none',
+                    zIndex: activeId === p.itemId ? 10 : 1,
+                    filter: activeId === p.itemId ? 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' : 'none',
+                    transition: activeId === p.itemId ? 'none' : 'filter 0.15s',
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+          {exportErr && <p style={{ fontSize: 11, color: '#c00', textAlign: 'center' }}>{exportErr}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-primary" style={{ flex: 1 }} onClick={handleExport} disabled={exporting}>
+              {exporting ? <><span className="spinner"/>Saving…</> : 'Save collage'}
+            </button>
+            <button style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Edit Outfit Modal ── */
 function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroups, categories }) {
   const [selected, setSelected] = useState(outfit.itemIds||[]);
@@ -1382,6 +1579,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
   const [filterCat, setFilterCat] = useState('All');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [showCollage, setShowCollage] = useState(false);
   const photoRef = useRef(null);
   const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const toggle = id => setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
@@ -1463,6 +1661,15 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
                   </button>
                 )}
                 {uploadErr && <p style={{ fontSize:10, color:'#c00', marginTop:3 }}>{uploadErr}</p>}
+                <button
+                  onClick={() => setShowCollage(true)}
+                  disabled={items.filter(i => (selected||[]).includes(i.id) && i.photo).length === 0}
+                  style={{ width:'100%', marginTop:6, fontSize:12, padding:'7px',
+                           border:'1px solid var(--border2)', borderRadius:'var(--radius)',
+                           background:'var(--bg2)', color:'var(--text2)', cursor:'pointer' }}
+                >
+                  🖼 Create collage
+                </button>
               </div>
               <div className="form-row">
                 {selectedItems.length>0 && (
@@ -1486,6 +1693,15 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
           </div>
         </div>
       </div>
+      {showCollage && (
+        <OutfitCollageModal
+          outfit={{ ...outfit, itemIds: selected }}
+          items={items}
+          cloudConfig={cloudConfig}
+          onSave={url => { setPhoto(url); setShowCollage(false); }}
+          onClose={() => setShowCollage(false)}
+        />
+      )}
     </div>
   );
 }
