@@ -458,6 +458,10 @@ const SUPABASE_URL  = 'https://lvkprwjvjgbobiypogqb.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2a3Byd2p2amdib2JpeXBvZ3FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NTE5MDUsImV4cCI6MjA5NDAyNzkwNX0.-y6hkU1TC1yI_4AZn-HfoPalcTLC6c0Red1QTaT4bkc';
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// ── Shared Cloudinary (all users upload here) ─────────────────
+const CLOUD_NAME    = 'ddx2mn7bx';
+const UPLOAD_PRESET = 'outfit_uploads';
+
 // ── Data mappers (camelCase ↔ snake_case) ─────────────────────
 function rowToItem(r) {
   return { id:r.id, name:r.name, category:r.category, color:r.color||'', brand:r.brand||'', cost:r.cost,
@@ -812,32 +816,7 @@ function SettingsModal({ onClose, currentUser, apiKey: initKey, cloudConfig: ini
           <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>Settings</p>
           <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
         </div>
-        <div style={{ marginBottom:20 }}>
-          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Photo Storage — Cloudinary</p>
-          <div className="ai-banner" style={{ marginBottom:10, fontSize:11 }}>
-            Photos upload to Cloudinary's free CDN — accessible on any device, no storage limits.
-          </div>
-          <div className="form-row"><label>Cloud name</label><input value={cloudName} onChange={e=>setCloudName(e.target.value)} placeholder="e.g. my-wardrobe-app" /></div>
-          <div className="form-row"><label>Upload preset (unsigned)</label><input value={uploadPreset} onChange={e=>setUploadPreset(e.target.value)} placeholder="e.g. outfit_unsigned" /></div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button className="btn-primary" style={{ flex:1 }} onClick={saveCloudinary} disabled={!cloudName.trim()||!uploadPreset.trim()}>{cloudSaved?'✓ Saved!':'Save Cloudinary'}</button>
-            {(cloudName||uploadPreset) && <button className="btn-danger" onClick={removeCloudinary}>Remove</button>}
-          </div>
-        </div>
         <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'0 0 18px' }} />
-        <div>
-          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>AI Auto-fill — Anthropic</p>
-          <div className="ai-banner" style={{ fontSize:11 }}>Upload a photo → Claude suggests name, category, color &amp; tags.</div>
-          <div className="form-row"><label>Anthropic API key</label>
-            <input type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder="sk-ant-..." />
-            <p style={{ fontSize:10, color:'var(--text3)', marginTop:5, lineHeight:1.5 }}>Get a key at <a href="https://console.anthropic.com" target="_blank" style={{ color:'var(--accent)' }}>console.anthropic.com</a> · stored only in this browser.</p>
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button className="btn-primary" style={{ flex:1 }} onClick={saveApiKey}>{saved?'✓ Saved!':'Save API key'}</button>
-            {key && <button className="btn-danger" onClick={removeApiKey}>Remove</button>}
-          </div>
-        </div>
-        <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'18px 0' }} />
         <div>
           <p style={{ fontWeight:600, fontSize:12, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Tag Groups</p>
           <p style={{ fontSize:11, color:'var(--text3)', marginBottom:12, lineHeight:1.5 }}>Customize the tags shown when building outfits.</p>
@@ -1632,9 +1611,9 @@ function MainApp({ currentUser, onLogout }) {
   const [tagGroups, setTagGroups] = useState(DEFAULT_TAG_GROUPS);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [apiKey, setApiKey] = useState('');
-  const [cloudConfig, setCloudConfig] = useState({ cloudName:'', uploadPreset:'' });
+  const [cloudConfig, setCloudConfig] = useState({ cloudName:CLOUD_NAME, uploadPreset:UPLOAD_PRESET });
   const [hasKey, setHasKey] = useState(false);
-  const [hasCloud, setHasCloud] = useState(false);
+  const [hasCloud, setHasCloud] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -1659,8 +1638,8 @@ function MainApp({ currentUser, onLogout }) {
       if (tagRes.data?.length) setTagGroups(tagRes.data);
       if (catRes.data?.list) setCategories(catRes.data.list);
       const s = settingsRes.data;
-      const ak = s?.api_key||''; const cc = { cloudName:s?.cloud_name||'', uploadPreset:s?.upload_preset||'' };
-      setApiKey(ak); setCloudConfig(cc); setHasKey(!!ak); setHasCloud(!!(cc.cloudName&&cc.uploadPreset));
+      const ak = s?.api_key||'';
+      setApiKey(ak); setHasKey(!!ak);
       setLoading(false);
     }
     load();
@@ -1759,20 +1738,6 @@ function MainApp({ currentUser, onLogout }) {
       </div>
 
       {/* Banners */}
-      {(!hasCloud || !hasKey) && (
-        <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-          {!hasCloud && (
-            <div style={{ padding:'9px 1.25rem', background:'#fffaed', fontSize:11, color:'#7a5200', borderBottom:'1px solid #f0d97a', cursor:'pointer', lineHeight:1.6 }} onClick={()=>setShowSettings(true)}>
-              ☁ <strong>Connect Cloudinary</strong> for photo storage across devices.
-            </div>
-          )}
-          {!hasKey && (
-            <div style={{ padding:'9px 1.25rem', background:'var(--accent-bg)', fontSize:11, color:'var(--accent)', borderBottom:'1px solid rgba(80,96,240,0.25)', cursor:'pointer', lineHeight:1.6 }} onClick={()=>setShowSettings(true)}>
-              ✨ <strong>Enable AI auto-fill</strong> — add your Anthropic API key in Settings.
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tab content */}
       {tab==='wardrobe' && <WardrobeTab items={items} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} apiKey={apiKey} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
