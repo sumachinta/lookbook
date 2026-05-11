@@ -454,8 +454,8 @@ const { useState, useMemo, useEffect, useRef } = React;
 // ── Supabase ─────────────────────────────────────────────────
 // Fill in your project URL and anon key from supabase.com → Project Settings → API
 // Also: disable "Confirm email" in Authentication → Settings
-const SUPABASE_URL  = 'https://YOUR_PROJECT_REF.supabase.co';
-const SUPABASE_ANON = 'YOUR_ANON_KEY_HERE';
+const SUPABASE_URL  = 'https://lvkprwjvjgbobiypogqb.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2a3Byd2p2amdib2JpeXBvZ3FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NTE5MDUsImV4cCI6MjA5NDAyNzkwNX0.-y6hkU1TC1yI_4AZn-HfoPalcTLC6c0Red1QTaT4bkc';
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ── Data mappers (camelCase ↔ snake_case) ─────────────────────
@@ -646,29 +646,32 @@ function colorDot(c) {
 /* ── Login Screen ── */
 function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState('login');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    setError(''); setLoading(true);
+    setError(''); setInfo(''); setLoading(true);
     try {
-      const uname = username.trim().toLowerCase();
-      if (!uname) { setError('Username is required.'); setLoading(false); return; }
+      const emailVal = email.trim().toLowerCase();
+      if (!emailVal) { setError('Email is required.'); setLoading(false); return; }
       if (!password) { setError('Password is required.'); setLoading(false); return; }
-      const email = uname + '@lookbook.local';
       if (mode === 'login') {
-        const { data, error: authErr } = await db.auth.signInWithPassword({ email, password });
-        if (authErr) { setError('Invalid username or password.'); setLoading(false); return; }
+        const { data, error: authErr } = await db.auth.signInWithPassword({ email: emailVal, password });
+        if (authErr) { setError('Invalid email or password.'); setLoading(false); return; }
         onLogin(data.user);
       } else {
         if (password.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
         if (password !== confirm) { setError('Passwords do not match.'); setLoading(false); return; }
-        const { data, error: authErr } = await db.auth.signUp({ email, password });
+        const { data, error: authErr } = await db.auth.signUp({ email: emailVal, password });
         if (authErr) { setError(authErr.message || 'Registration failed.'); setLoading(false); return; }
-        await seedSampleData(data.user.id);
+        if (!data.session) {
+          setInfo('Check your email for a confirmation link. Once verified, come back and sign in.');
+          setLoading(false); return;
+        }
         onLogin(data.user);
       }
     } catch(e) { setError('Something went wrong. Please try again.'); }
@@ -684,7 +687,7 @@ function LoginScreen({ onLogin }) {
         <p style={{ fontSize:12, color:'var(--text3)', marginBottom:'1.75rem' }}>Your personal wardrobe guide</p>
         <div style={{ display:'flex', marginBottom:'1.5rem', borderBottom:'1px solid var(--border)' }}>
           {[['login','Sign in'],['register','Create account']].map(([m,label]) => (
-            <button key={m} onClick={()=>{ setMode(m); setError(''); }} style={{
+            <button key={m} onClick={()=>{ setMode(m); setError(''); setInfo(''); }} style={{
               flex:1, border:'none', borderRadius:0, background:'transparent',
               color: mode===m ? 'var(--text)' : 'var(--text3)',
               fontWeight: mode===m ? 600 : 400,
@@ -694,8 +697,8 @@ function LoginScreen({ onLogin }) {
           ))}
         </div>
         <div className="form-row">
-          <label>Username</label>
-          <input value={username} onChange={e=>setUsername(e.target.value)} onKeyDown={onKey} placeholder="your username" autoFocus />
+          <label>Email</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={onKey} placeholder="you@example.com" autoFocus />
         </div>
         <div className="form-row">
           <label>Password</label>
@@ -708,7 +711,8 @@ function LoginScreen({ onLogin }) {
           </div>
         )}
         {error && <p style={{ fontSize:12, color:'#c00', marginBottom:10, lineHeight:1.5 }}>{error}</p>}
-        <button className="btn-primary" style={{ width:'100%', padding:'10px', marginTop:4 }} onClick={submit} disabled={loading||!username.trim()||!password}>
+        {info  && <p style={{ fontSize:12, color:'#2a7', marginBottom:10, lineHeight:1.5 }}>{info}</p>}
+        <button className="btn-primary" style={{ width:'100%', padding:'10px', marginTop:4 }} onClick={submit} disabled={loading||!email.trim()||!password}>
           {loading ? <><span className="spinner" style={{ borderColor:'var(--bg)', borderTopColor:'transparent' }}/>…</> : mode==='login' ? 'Sign in' : 'Create account'}
         </button>
         {mode === 'register' && (
@@ -779,10 +783,10 @@ function SettingsModal({ onClose, currentUser, apiKey: initKey, cloudConfig: ini
     onSettingsSaved({ cloudConfig:{ cloudName:'', uploadPreset:'' } });
   };
   const handleExport = () => {
-    const data = { version:1, exportedAt:new Date().toISOString(), exportedBy:currentUser.email.replace('@lookbook.local',''), items, outfits, tagGroups:groups, categories:cats };
+    const data = { version:1, exportedAt:new Date().toISOString(), exportedBy:currentUser.email.split('@')[0], items, outfits, tagGroups:groups, categories:cats };
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `lookbook-${currentUser.email.replace('@lookbook.local','')}-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href);
+    a.download = `lookbook-${currentUser.email.split('@')[0]}-${Date.now()}.json`; a.click(); URL.revokeObjectURL(a.href);
   };
   const handleImport = async (e) => {
     const file = e.target.files[0]; if(!file) return;
@@ -1644,7 +1648,13 @@ function MainApp({ currentUser, onLogout }) {
         db.from('categories').select('list').eq('user_id', uid).maybeSingle(),
         db.from('user_settings').select('*').eq('user_id', uid).maybeSingle(),
       ]);
-      setItems((itemsRes.data||[]).map(rowToItem));
+      let itemRows = itemsRes.data || [];
+      if (!itemRows.length) {
+        await seedSampleData(uid);
+        const { data: seeded } = await db.from('items').select('*').eq('user_id', uid).order('created_at');
+        itemRows = seeded || [];
+      }
+      setItems(itemRows.map(rowToItem));
       setOutfits((outfitsRes.data||[]).map(rowToOutfit));
       if (tagRes.data?.length) setTagGroups(tagRes.data);
       if (catRes.data?.list) setCategories(catRes.data.list);
@@ -1711,7 +1721,7 @@ function MainApp({ currentUser, onLogout }) {
   };
 
   const TABS = [{ id:'wardrobe', label:'Wardrobe' }, { id:'builder', label:'Builder' }, { id:'outfits', label:'Outfits' }];
-  const displayName = currentUser.email.replace('@lookbook.local','');
+  const displayName = currentUser.email.split('@')[0];
 
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg3)' }}>
