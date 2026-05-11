@@ -18,6 +18,14 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script type="module">
+  try {
+    const { removeBackground } = await import('https://esm.sh/@imgly/background-removal@1.4.5');
+    window.__removeBackground = removeBackground;
+  } catch(e) {
+    console.warn('BG removal library failed to load:', e);
+  }
+</script>
 <style>
 :root {
   --bg: #faf9f7;
@@ -976,16 +984,20 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
     let fileForUpload = file;
     let transparentBlobUrl = null;
     try {
-      const { removeBackground } = await import('https://esm.sh/@imgly/background-removal@1.4.5');
+      const removeBackground = window.__removeBackground;
+      if (!removeBackground) throw new Error('BG removal library not loaded — check console');
       setBgPhase('inference');
       const resultBlob = await removeBackground(file, {
+        proxyToWorker: false,
         progress: (key) => { setBgPhase(key.startsWith('fetch') ? 'model' : 'inference'); }
       });
       fileForUpload = new File([resultBlob], 'item.png', { type: 'image/png' });
       transparentBlobUrl = URL.createObjectURL(resultBlob);
       set('photo', transparentBlobUrl);
-    } catch {
-      setBgError('Background removal failed — uploading original photo.');
+    } catch(bgErr) {
+      const msg = bgErr?.message || String(bgErr);
+      console.error('BG removal error:', bgErr);
+      setBgError('BG removal failed: ' + msg.slice(0, 120));
     }
     setBgRemoving(false); setBgPhase('');
 
