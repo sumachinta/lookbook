@@ -1454,6 +1454,7 @@ const PLACEMENT_MAP = {
 function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
   const [placements, setPlacements] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x:0, y:0 });
   const [exporting, setExporting] = useState(false);
   const [exportErr, setExportErr] = useState('');
@@ -1479,8 +1480,18 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
     const p = placements.find(pl => pl.itemId === itemId);
     if(!p) return;
     setActiveId(itemId);
+    setSelectedId(itemId);
     setDragOffset({ x: (e.clientX - rect.left) - p.x, y: (e.clientY - rect.top) - p.y });
     e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const zoom = (itemId, factor) => {
+    setPlacements(prev => prev.map(pl => {
+      if(pl.itemId !== itemId) return pl;
+      const newW = Math.max(50, Math.min(COLLAGE_W, Math.round(pl.w * factor)));
+      const newH = Math.max(50, Math.min(COLLAGE_H, Math.round(pl.h * factor)));
+      return { ...pl, w: newW, h: newH };
+    }));
   };
 
   const handlePointerMove = (e) => {
@@ -1541,7 +1552,7 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
           <button style={{ border: 'none', padding: '4px 8px', fontSize: 16 }} onClick={onClose}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, alignSelf: 'flex-start' }}>Drag items to arrange your outfit board</p>
+          <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, alignSelf: 'flex-start' }}>Drag to move · tap to select · use − + to resize</p>
           <div
             ref={canvasRef}
             style={{
@@ -1558,10 +1569,12 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
+            onClick={e => { if(e.target === canvasRef.current) setSelectedId(null); }}
           >
             {placements.map(p => {
               const item = items.find(i => i.id === p.itemId);
               if(!item?.photo) return null;
+              const isSelected = selectedId === p.itemId;
               return (
                 <img
                   key={p.itemId}
@@ -1574,9 +1587,11 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
                     left: p.x, top: p.y,
                     width: p.w, height: p.h,
                     objectFit: 'contain',
-                    cursor: 'grab',
+                    cursor: activeId === p.itemId ? 'grabbing' : 'grab',
                     userSelect: 'none',
-                    zIndex: activeId === p.itemId ? 10 : 1,
+                    zIndex: isSelected ? 10 : 1,
+                    outline: isSelected ? '2px solid var(--accent)' : 'none',
+                    outlineOffset: 2,
                     filter: activeId === p.itemId ? 'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' : 'none',
                     transition: activeId === p.itemId ? 'none' : 'filter 0.15s',
                   }}
@@ -1584,6 +1599,18 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
               );
             })}
           </div>
+          {selectedId && (() => {
+            const selItem = items.find(i => i.id === selectedId);
+            return (
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10, width:'100%', maxWidth:COLLAGE_W }}>
+                <span style={{ fontSize:11, color:'var(--text2)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {selItem?.name || 'Item'}
+                </span>
+                <button onClick={() => zoom(selectedId, 0.85)} style={{ border:'1px solid var(--border2)', borderRadius:4, padding:'3px 14px', fontSize:18, background:'var(--bg)', cursor:'pointer', lineHeight:1 }}>−</button>
+                <button onClick={() => zoom(selectedId, 1.18)} style={{ border:'1px solid var(--border2)', borderRadius:4, padding:'3px 14px', fontSize:18, background:'var(--bg)', cursor:'pointer', lineHeight:1 }}>+</button>
+              </div>
+            );
+          })()}
         </div>
         <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
           {exportErr && <p style={{ fontSize: 11, color: '#c00', textAlign: 'center' }}>{exportErr}</p>}
