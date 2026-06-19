@@ -4,27 +4,35 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lookbook</title>
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#191816">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Lookbook">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script type="module">
-  try {
-    const { removeBackground } = await import('https://esm.sh/@imgly/background-removal@1.4.5');
-    window.__removeBackground = removeBackground;
-  } catch(e) {
-    console.warn('BG removal library failed to load:', e);
-  }
+<script>
+  // Inject the BG-removal module script after Babel has already scanned the DOM,
+  // so Babel never sees a type="module" tag and can't mis-transform it.
+  setTimeout(function() {
+    var s = document.createElement('script');
+    s.type = 'module';
+    s.textContent = [
+      'try {',
+      '  const { removeBackground } = await import("https://esm.sh/@imgly/background-removal@1.4.5");',
+      '  window.__removeBackground = removeBackground;',
+      '} catch(e) {',
+      '  console.warn("BG removal library failed to load:", e);',
+      '}'
+    ].join('\n');
+    document.head.appendChild(s);
+  }, 0);
 </script>
 <style>
 :root {
