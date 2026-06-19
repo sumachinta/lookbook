@@ -971,6 +971,7 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
   const [bgRemoving, setBgRemoving] = useState(false);
   const [bgPhase, setBgPhase] = useState('');
   const [bgError, setBgError] = useState('');
+  const [removeBg, setRemoveBg] = useState(true);
   const fileRef = useRef();
   const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
@@ -1009,27 +1010,29 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
 
     if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); autoFill(localPreview); return; }
 
-    // Step B: background removal (browser WASM, free)
-    setBgRemoving(true); setBgPhase('model');
+    // Step B: background removal (skipped if user unchecked the toggle)
     let fileForUpload = file;
     let transparentBlobUrl = null;
-    try {
-      const removeBackground = window.__removeBackground;
-      if (!removeBackground) throw new Error('BG removal library not loaded — check console');
-      setBgPhase('inference');
-      const resultBlob = await removeBackground(file, {
-        proxyToWorker: false,
-        progress: (key) => { setBgPhase(key.startsWith('fetch') ? 'model' : 'inference'); }
-      });
-      fileForUpload = new File([resultBlob], 'item.png', { type: 'image/png' });
-      transparentBlobUrl = URL.createObjectURL(resultBlob);
-      set('photo', transparentBlobUrl);
-    } catch(bgErr) {
-      const msg = bgErr?.message || String(bgErr);
-      console.error('BG removal error:', bgErr);
-      setBgError('BG removal failed: ' + msg.slice(0, 120));
+    if(removeBg) {
+      setBgRemoving(true); setBgPhase('model');
+      try {
+        const removeBackground = window.__removeBackground;
+        if (!removeBackground) throw new Error('BG removal library not loaded — check console');
+        setBgPhase('inference');
+        const resultBlob = await removeBackground(file, {
+          proxyToWorker: false,
+          progress: (key) => { setBgPhase(key.startsWith('fetch') ? 'model' : 'inference'); }
+        });
+        fileForUpload = new File([resultBlob], 'item.png', { type: 'image/png' });
+        transparentBlobUrl = URL.createObjectURL(resultBlob);
+        set('photo', transparentBlobUrl);
+      } catch(bgErr) {
+        const msg = bgErr?.message || String(bgErr);
+        console.error('BG removal error:', bgErr);
+        setBgError('BG removal failed: ' + msg.slice(0, 120));
+      }
+      setBgRemoving(false); setBgPhase('');
     }
-    setBgRemoving(false); setBgPhase('');
 
     // Step C: upload (transparent PNG or original fallback)
     setUploading(true); setUploadPct(20);
@@ -1074,6 +1077,10 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
                     ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</>
                     : form.photo ? '📷 Change photo' : '📷 Upload photo'}
               </button>
+              <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)', cursor:'pointer', userSelect:'none' }}>
+                <input type="checkbox" checked={removeBg} onChange={e=>setRemoveBg(e.target.checked)} style={{ margin:0 }}/>
+                Remove background
+              </label>
               {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
               {form.photo && (
                 <button className="btn-ai" onClick={()=>autoFill()} disabled={analyzing||uploading}>
