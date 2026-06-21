@@ -497,29 +497,30 @@ async function seedSampleData(userId) {
 const DEFAULT_CATEGORIES = ['Top','Bottom','Shoes','Outerwear','Accessory','Dress','Other'];
 const CAT_EMOJI  = { Top:'👕', Bottom:'👖', Shoes:'👟', Outerwear:'🧥', Dress:'👗', Accessory:'💍', Other:'👔' };
 const COLOR_DICT = [
-  'White','Off-White','Cream','Light Gray','Gray','Charcoal','Black',
-  'Beige','Tan','Camel','Brown','Chocolate',
-  'Blush','Rose','Red','Burgundy','Rust',
-  'Coral','Orange','Mustard','Yellow',
-  'Olive','Sage','Green','Forest Green',
-  'Baby Blue','Sky Blue','Blue','Navy','Royal Blue',
-  'Lavender','Lilac','Purple','Plum',
-  'Pink','Hot Pink',
+  'White','Beige',
+  'Pink','Red','Burgundy',
+  'Orange','Mustard','Yellow',
+  'Olive','Green',
+  'Baby Blue','Navy','Denim',
+  'Lavender','Purple',
   'Gold','Silver',
-  'Denim','Multicolor','Print','Pattern'
+  'Gray',
+  'Brown','Chocolate',
+  'Multicolor','Print',
+  'Black'
 ];
 const COLOR_ORDER = [
-  'White','Off-White','Cream','Beige',
-  'Tan','Camel','Brown','Chocolate',
-  'Light Gray','Gray','Silver','Gold',
-  'Blush','Pink','Rose','Hot Pink',
-  'Coral','Red','Rust','Burgundy',
+  'White','Beige',
+  'Pink','Red','Burgundy',
   'Orange','Mustard','Yellow',
-  'Olive','Sage','Green','Forest Green',
-  'Baby Blue','Sky Blue','Denim','Blue','Royal Blue','Navy',
-  'Lavender','Lilac','Purple','Plum',
-  'Charcoal','Black',
-  'Multicolor','Print','Pattern'
+  'Olive','Green',
+  'Baby Blue','Navy','Denim',
+  'Lavender','Purple',
+  'Gold','Silver',
+  'Gray',
+  'Brown','Chocolate',
+  'Multicolor','Print',
+  'Black'
 ];
 const colorRank = c => { const i = COLOR_ORDER.indexOf(c); return i === -1 ? 999 : i; };
 
