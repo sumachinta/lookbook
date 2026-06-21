@@ -1,4 +1,4 @@
-const CACHE = 'lookbook-v5';
+const CACHE = 'lookbook-v6';
 const PRECACHE = [
   '/',
   '/index.html',
