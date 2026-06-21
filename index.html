@@ -633,16 +633,17 @@ function OccasionPicker({ selected, onChange, tagGroups }) {
 }
 
 const COLOR_SWATCH = {
-  'White':'#f5f5f5','Off-White':'#ede8dc','Cream':'#f5f0e0','Light Gray':'#c8c8c8','Gray':'#909090','Charcoal':'#555552','Black':'#1a1a1a',
-  'Beige':'#d4b896','Tan':'#c49a6c','Camel':'#c19a6b','Brown':'#8B5E3C','Chocolate':'#5c3317',
-  'Blush':'#f4b8c1','Rose':'#e8758a','Red':'#E24B4A','Burgundy':'#7f1d2e','Rust':'#c05a2a',
-  'Coral':'#e86f5a','Orange':'#D85A30','Mustard':'#d4a017','Yellow':'#EFC227',
-  'Olive':'#6b6b3a','Sage':'#8fab8a','Green':'#4a8c3f','Forest Green':'#2d5a27',
-  'Baby Blue':'#a8cde8','Sky Blue':'#72b8e0','Blue':'#378ADD','Navy':'#1e3a5f','Royal Blue':'#3a50c4',
-  'Lavender':'#c5b8e8','Lilac':'#b89fd4','Purple':'#7F77DD','Plum':'#5b2d6e',
-  'Pink':'#D4537E','Hot Pink':'#e8267a',
+  'White':'#f5f5f5','Beige':'#d4b896',
+  'Pink':'#D4537E','Red':'#E24B4A','Burgundy':'#7f1d2e',
+  'Orange':'#D85A30','Mustard':'#d4a017','Yellow':'#EFC227',
+  'Olive':'#6b6b3a','Green':'#4a8c3f',
+  'Baby Blue':'#a8cde8','Navy':'#1e3a5f','Denim':'#4a6fa5',
+  'Lavender':'#c5b8e8','Purple':'#7F77DD',
   'Gold':'#c8a840','Silver':'#b0b0b0',
-  'Denim':'#4a6fa5','Multicolor':'linear-gradient(135deg,#f00,#ff0,#0f0,#00f)','Print':'#c0a0c0','Pattern':'#a0c0a0'
+  'Gray':'#909090',
+  'Brown':'#8B5E3C','Chocolate':'#5c3317',
+  'Multicolor':'linear-gradient(135deg,#f00,#ff0,#0f0,#00f)','Print':'#c0a0c0',
+  'Black':'#1a1a1a'
 };
 function colorDot(c) {
   const bg = COLOR_SWATCH[c] || '#b0b0b0';
@@ -1050,10 +1051,19 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
             <select value={form.category} onChange={e=>set('category',e.target.value)}>{cats.map(c=><option key={c}>{c}</option>)}</select>
           </div>
           <div className="form-row" style={{ marginBottom:0 }}><label>Color</label>
-            <select value={form.color} onChange={e=>set('color',e.target.value)}>
-              <option value="">Select color…</option>
-              {COLOR_DICT.map(c=><option key={c} value={c}>{c}</option>)}
-            </select>
+            <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+              {form.color && (
+                <span style={{
+                  display:'inline-block', width:18, height:18, borderRadius:3, flexShrink:0,
+                  background: COLOR_SWATCH[form.color] || '#b0b0b0',
+                  border:'1px solid var(--border2)'
+                }} />
+              )}
+              <select value={form.color} onChange={e=>set('color',e.target.value)} style={{ flex:1 }}>
+                <option value="">Select color…</option>
+                {COLOR_DICT.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
           </div>
         </div>
         <div className="form-row">
@@ -1207,14 +1217,24 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
+  const [filterColor, setFilterColor] = useState('');
   const [search, setSearch] = useState('');
   const [showBulk, setShowBulk] = useState(false);
 
+  const setCat = c => { setFilterCat(c); setFilterColor(''); };
+
+  const colorsInCat = useMemo(() => {
+    if(filterCat === 'All') return [];
+    const seen = new Set(items.filter(i => i.category === filterCat && i.color).map(i => i.color));
+    return COLOR_DICT.filter(c => seen.has(c));
+  }, [items, filterCat]);
+
   const filtered = useMemo(() => items.filter(i => {
     if(filterCat !== 'All' && i.category !== filterCat) return false;
+    if(filterColor && i.color !== filterColor) return false;
     if(search && ![i.name, i.brand||'', i.color||'', ...(i.tags||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
-  }), [items, filterCat, search]);
+  }), [items, filterCat, filterColor, search]);
 
   const cats = categories || DEFAULT_CATEGORIES;
   const grouped = useMemo(() => {
@@ -1236,15 +1256,47 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
 
       {/* Toolbar */}
       <div className="toolbar">
-        <button className={`cat-chip${filterCat==='All'?' active':''}`} onClick={()=>setFilterCat('All')}>All</button>
+        <button className={`cat-chip${filterCat==='All'?' active':''}`} onClick={()=>setCat('All')}>All</button>
         {cats.map(c => (
-          <button key={c} className={`cat-chip${filterCat===c?' active':''}`} onClick={()=>setFilterCat(c)}>{c}</button>
+          <button key={c} className={`cat-chip${filterCat===c?' active':''}`} onClick={()=>setCat(c)}>{c}</button>
         ))}
         <div className="toolbar-divider" />
         <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
         <button className="add-multi-btn" onClick={()=>setShowBulk(true)}>+ Add multiple</button>
         <button className="add-btn" onClick={()=>setModal('add')}>+ Add</button>
       </div>
+
+      {/* Color filter row — only shown when a category is selected */}
+      {colorsInCat.length > 0 && (
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'6px 14px 10px' }}>
+          {filterColor && (
+            <button
+              onClick={() => setFilterColor('')}
+              style={{ fontSize:11, padding:'3px 10px', borderRadius:20, border:'1px solid var(--border2)', background:'var(--bg2)', cursor:'pointer', color:'var(--text2)' }}
+            >✕ Clear</button>
+          )}
+          {colorsInCat.map(c => {
+            const active = filterColor === c;
+            const swatch = COLOR_SWATCH[c] || '#b0b0b0';
+            return (
+              <button key={c} onClick={() => setFilterColor(active ? '' : c)} style={{
+                display:'flex', alignItems:'center', gap:5,
+                fontSize:11, padding:'3px 10px', borderRadius:20, cursor:'pointer',
+                border: active ? '1.5px solid var(--accent)' : '1px solid var(--border2)',
+                background: active ? 'var(--accent-bg)' : 'var(--bg2)',
+                color: active ? 'var(--accent)' : 'var(--text2)',
+                fontWeight: active ? 600 : 400,
+              }}>
+                <span style={{
+                  display:'inline-block', width:10, height:10, borderRadius:2, flexShrink:0,
+                  background: swatch, border:'1px solid var(--border2)'
+                }} />
+                {c}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Grid — sectioned when All, flat when filtered or searching */}
       {filtered.length === 0
