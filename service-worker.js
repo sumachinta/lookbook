@@ -1,7 +1,5 @@
-const CACHE = 'lookbook-v6';
+const CACHE = 'lookbook-v7';
 const PRECACHE = [
-  '/',
-  '/index.html',
   'https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap',
 ];
 
@@ -20,13 +18,26 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Network-first for Supabase, Cloudinary, Anthropic API calls
+  // Pass through for Supabase, Cloudinary, Anthropic API calls
   if (e.request.url.includes('supabase.co') ||
       e.request.url.includes('cloudinary.com') ||
       e.request.url.includes('anthropic.com')) {
     return;
   }
-  // Cache-first for static assets
+  // Network-first for HTML — ensures app updates are always picked up immediately
+  if (e.request.mode === 'navigate' || e.request.headers.get('accept')?.includes('text/html')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // Cache-first for everything else (fonts, icons, JS libs)
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
       if (res.ok && e.request.method === 'GET') {
