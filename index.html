@@ -79,8 +79,6 @@ button:active { transform: scale(0.98); }
 button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
 .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
 .btn-primary:hover { opacity: 0.86; background: var(--text); }
-.btn-ai { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); font-weight: 500; }
-.btn-ai:hover { opacity: 0.85; background: var(--accent-bg); }
 .btn-danger { color: #c03030; border-color: #c03030; }
 .btn-danger:hover { background: #fff0f0; }
 .tag {
@@ -475,7 +473,8 @@ function itemToRow(item, userId) {
 }
 function rowToOutfit(r) {
   return { id:r.id, name:r.name||'', itemIds:r.item_ids||[], occasions:r.occasions||[],
-    notes:r.notes||'', photo:r.photo||'', wornCount:r.worn_count||0, lastWorn:r.last_worn||null };
+    notes:r.notes||'', photo:r.photo||'', collage:r.collage||null,
+    wornCount:r.worn_count||0, lastWorn:r.last_worn||null };
 }
 function outfitToRow(outfit, userId) {
   return { user_id:userId, name:outfit.name||'', item_ids:outfit.itemIds||[],
@@ -557,52 +556,6 @@ async function uploadToCloudinary(file, cloudName, uploadPreset) {
   const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method:'POST', body:formData });
   if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error?.message || `Cloudinary error (${res.status})`); }
   return (await res.json()).secure_url;
-}
-
-async function analyzeClothingImage(photoUrl, categories = DEFAULT_CATEGORIES) {
-  const { data:{ session } } = await db.auth.getSession();
-  const imageSource = photoUrl.startsWith('http')
-    ? { type:'url', url:photoUrl }
-    : { type:'base64', media_type:photoUrl.split(';')[0].split(':')[1]||'image/jpeg', data:photoUrl.split(',')[1] };
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-proxy`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${session?.access_token}` },
-    body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:300, messages:[{ role:'user', content:[
-      { type:'image', source:imageSource },
-      { type:'text', text:`Analyze this clothing item. Reply ONLY with a valid JSON object, no markdown:\n{"name":"short descriptive name","category":"one of: ${categories.join(' ')}","color":"pick the single closest color from this list: ${COLOR_DICT.join(', ')}"}` }
-    ]}]})
-  });
-  if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
-  const data = await res.json();
-  return JSON.parse((data.content?.find(b=>b.type==='text')?.text||'').replace(/```json|```/g,'').trim());
-}
-
-async function suggestOutfitOccasions(selectedItems, tagGroups) {
-  const { data:{ session } } = await db.auth.getSession();
-  const contentBlocks = [];
-  for (const item of selectedItems) {
-    if (item.photo) {
-      const imageSource = item.photo.startsWith('http')
-        ? { type:'url', url:item.photo }
-        : { type:'base64', media_type:item.photo.split(';')[0].split(':')[1]||'image/jpeg', data:item.photo.split(',')[1] };
-      contentBlocks.push({ type:'image', source:imageSource });
-    }
-  }
-  const itemSummary = selectedItems.map(i=>`${i.name} (${i.category}, ${i.color})`).join('; ');
-  const groups = tagGroups || DEFAULT_TAG_GROUPS;
-  const groupsDesc = groups.map(g => `${g.name}: ${g.tags.join(', ')}`).join('\n');
-  const exampleTag = groups[0]?.tags[0] || '💼 Work';
-  contentBlocks.push({ type:'text', text:`Outfit items: ${itemSummary}\nChoose 1-3 tags from the groups below. Reply ONLY with a JSON array.\n${groupsDesc}\nExample: ["${exampleTag}"]` });
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-proxy`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${session?.access_token}` },
-    body: JSON.stringify({ model:'claude-opus-4-6', max_tokens:150, messages:[{ role:'user', content:contentBlocks }]})
-  });
-  if(!res.ok){ const e=await res.json().catch(()=>{}); throw new Error(e?.error?.message||`API error ${res.status}`); }
-  const data = await res.json();
-  const parsed = JSON.parse((data.content?.find(b=>b.type==='text')?.text||'[]').replace(/```json|```/g,'').trim());
-  const allTags = groups.flatMap(g=>g.tags);
-  return parsed.filter(o=>allTags.includes(o));
 }
 
 function OccasionPicker({ selected, onChange, tagGroups }) {
@@ -950,37 +903,13 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadErr, setUploadErr] = useState('');
-  const [analyzing, setAnalyzing] = useState(false);
-  const [aiError, setAiError] = useState('');
-  const [aiDone, setAiDone] = useState(false);
   const fileRef = useRef();
   const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
-  const autoFill = async (overridePhoto) => {
-    const photo = overridePhoto || form.photo;
-    if(!photo) return;
-    setAnalyzing(true); setAiError(''); setAiDone(false);
-    try {
-      const r = await analyzeClothingImage(photo, cats);
-      const catFinal = cats.includes(r.category) ? r.category : form.category;
-      const updates = { name:r.name||form.name, category:catFinal, color:r.color||form.color };
-      let tags = form.tags;
-      if (tagGroups?.length) {
-        try {
-          const tempItem = { name:updates.name, category:catFinal, color:updates.color, photo };
-          tags = await suggestOutfitOccasions([tempItem], tagGroups);
-        } catch {}
-      }
-      setForm(f=>({ ...f, ...updates, tags }));
-      setAiDone(true);
-    } catch(err) { setAiError('AI analysis failed. Please try again.'); }
-    setAnalyzing(false);
-  };
-
   const handleFile = async e => {
     const rawFile = e.target.files[0]; if(!rawFile) return;
-    setUploadErr(''); setAiDone(false);
+    setUploadErr('');
 
     // Resize to max 800px to reduce storage and upload time
     const file = await resizeImageFile(rawFile, 800);
@@ -989,7 +918,7 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
     const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
     set('photo', localPreview);
 
-    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); autoFill(localPreview); return; }
+    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); return; }
 
     // Upload
     setUploading(true); setUploadPct(20);
@@ -998,7 +927,6 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
       const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
       setUploadPct(100);
       set('photo', url);
-      autoFill(url);
     } catch(err) { setUploadErr(err.message||'Upload failed.'); }
     setUploading(false); setUploadPct(0);
   };
@@ -1032,14 +960,8 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
                   : form.photo ? '📷 Change photo' : '📷 Upload photo'}
               </button>
               {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
-              {form.photo && (
-                <button className="btn-ai" onClick={()=>autoFill()} disabled={analyzing||uploading}>
-                  {analyzing ? <><span className="spinner"/>Analyzing…</> : aiDone ? '✓ Auto-filled · ↺ Re-analyze' : '↺ Re-analyze'}
-                </button>
-              )}
               {uploadErr && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{uploadErr}</p>}
-              {aiError && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{aiError}</p>}
-              {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setAiDone(false); setUploadErr(''); }}>Remove photo</button>}
+              {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setUploadErr(''); }}>Remove photo</button>}
               {form.photo && form.photo.startsWith('http') && <p style={{ fontSize:10, color:'#39a855' }}>☁ On Cloudinary CDN</p>}
             </div>
           </div>
@@ -1139,9 +1061,7 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
           photoUrl = await uploadToCloudinary(f.file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
         }
         const cats = categories || DEFAULT_CATEGORIES;
-        let meta = { name: f.file.name.replace(/\.[^.]+$/,''), category:cats[0]||'Other', color:'' };
-        try { meta = await analyzeClothingImage(photoUrl, cats); } catch {}
-        const item = { name: meta.name||f.file.name, category: cats.includes(meta.category)?meta.category:(cats[0]||'Other'), color: meta.color||'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
+        const item = { name: f.file.name.replace(/\.[^.]+$/,''), category: cats[0]||'Other', color:'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
         results.push(item);
         setFiles(p => p.map((x,j) => j===i ? { ...x, status:'done', name:item.name } : x));
       } catch(err) {
@@ -1161,7 +1081,7 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
     <div className="overlay" onClick={onClose}>
       <div className="modal" style={{ width:480 }} onClick={e=>e.stopPropagation()}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.25rem' }}>
-          <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>Add multiple items</p>
+          <p style={{ fontWeight:600, fontSize:15, letterSpacing:'-0.01em' }}>Add items</p>
           <button style={{ border:'none', padding:'4px 8px', fontSize:16 }} onClick={onClose}>✕</button>
         </div>
 
@@ -1262,8 +1182,7 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
         ))}
         <div className="toolbar-divider" />
         <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
-        <button className="add-multi-btn" onClick={()=>setShowBulk(true)}>+ Add multiple</button>
-        <button className="add-btn" onClick={()=>setModal('add')}>+ Add</button>
+        <button className="add-btn" onClick={()=>setShowBulk(true)}>+ Add items</button>
       </div>
 
       {/* Color filter row — only shown when a category is selected */}
@@ -1302,7 +1221,7 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
       {filtered.length === 0
         ? <div className="empty-state">
             {items.length === 0
-              ? <>No items yet.<br/><span style={{fontSize:12}}>Tap <strong>+ Add</strong> to start building your wardrobe.</span></>
+              ? <>No items yet.<br/><span style={{fontSize:12}}>Tap <strong>+ Add items</strong> to start building your wardrobe.</span></>
               : <>No items match the filter.</>
             }
           </div>
@@ -1338,8 +1257,6 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
   const [occasions, setOccasions] = useState([]);
   const [notes, setNotes] = useState('');
   const [saved, setSaved] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
 
   const toggle = id => setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
   const selectedItems = items.filter(i=>selected.includes(i.id));
@@ -1353,14 +1270,6 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
       .filter(r => r.catItems.length > 0),
     [items, cats]
   );
-
-  const suggestOcc = async () => {
-    if(!selectedItems.length) return;
-    setAiLoading(true); setAiError('');
-    try { const s = await suggestOutfitOccasions(selectedItems, tagGroups); setOccasions(s); }
-    catch(e) { setAiError('Could not suggest occasions. Please try again.'); }
-    setAiLoading(false);
-  };
 
   const saveOutfit = async () => {
     if(!canSave) return;
@@ -1431,15 +1340,7 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
         )}
 
         <div className="form-row">
-          {selectedItems.length > 0 && (
-            <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:7 }}>
-              <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>
-                {aiLoading ? <><span className="spinner"/>…</> : '✨ AI suggest'}
-              </button>
-            </div>
-          )}
           <OccasionPicker selected={occasions} onChange={setOccasions} tagGroups={tagGroups} />
-          {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:5 }}>{aiError}</p>}
         </div>
         <div className="form-row">
           <label>Notes</label>
@@ -1466,7 +1367,7 @@ const PLACEMENT_MAP = {
   Other:     { w:150, h:150, x:30,  y:150 },
 };
 
-function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
+function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initialPlacements }) {
   const [placements, setPlacements] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -1477,8 +1378,13 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
 
   useEffect(() => {
     const outfitItems = items.filter(i => (outfit.itemIds||[]).includes(i.id) && i.photo);
+    // Restore a previously-saved arrangement when available, so re-editing a
+    // collage continues from where it was left off instead of starting over.
+    const savedById = {};
+    (initialPlacements || []).forEach(p => { savedById[p.itemId] = p; });
     let accY = 0;
     setPlacements(outfitItems.map(item => {
+      if (savedById[item.id]) return { ...savedById[item.id], itemId: item.id };
       const base = PLACEMENT_MAP[item.category] || { w:150, h:150, x:30, y:30 };
       let p = { itemId: item.id, ...base };
       if(item.category === 'Accessory' || item.category === 'Other') {
@@ -1546,7 +1452,7 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
       const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
       const file = new File([blob], `collage-${Date.now()}.png`, { type: 'image/png' });
       const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
-      onSave(url);
+      onSave(url, placements);
       onClose();
     } catch(err) {
       setExportErr('Export failed: ' + (err.message || 'unknown error'));
@@ -1563,7 +1469,7 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose }) {
         boxShadow: '0 25px 80px rgba(0,0,0,0.3)', animation: 'slideUp 0.2s ease'
       }}>
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <p style={{ fontWeight: 600, fontSize: 14 }}>Create collage</p>
+          <p style={{ fontWeight: 600, fontSize: 14 }}>{initialPlacements?.length ? 'Edit collage' : 'Create collage'}</p>
           <button style={{ border: 'none', padding: '4px 8px', fontSize: 16 }} onClick={onClose}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1647,11 +1553,10 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
   const [occasions, setOccasions] = useState(outfit.occasions||[]);
   const [notes, setNotes] = useState(outfit.notes||'');
   const [photo, setPhoto] = useState(outfit.photo||'');
+  const [collage, setCollage] = useState(outfit.collage||null);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState('');
   const [filterCat, setFilterCat] = useState('All');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
   const [showCollage, setShowCollage] = useState(false);
   const photoRef = useRef(null);
   const cloudinaryReady = !!(cloudConfig?.cloudName && cloudConfig?.uploadPreset);
@@ -1671,16 +1576,9 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
     setUploading(false);
     e.target.value = '';
   };
-  const suggestOcc = async () => {
-    if(!selectedItems.length) return;
-    setAiLoading(true); setAiError('');
-    try { setOccasions(await suggestOutfitOccasions(selectedItems, tagGroups)); }
-    catch(e) { setAiError('Could not suggest occasions. Please try again.'); }
-    setAiLoading(false);
-  };
   const submit = () => {
     if(!canSave) return;
-    onSave({ ...outfit, itemIds:selected, occasions, notes, photo });
+    onSave({ ...outfit, itemIds:selected, occasions, notes, photo, collage });
     onClose();
   };
   return (
@@ -1742,17 +1640,11 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
                            border:'1px solid var(--border2)', borderRadius:'var(--radius)',
                            background:'var(--bg2)', color:'var(--text2)', cursor:'pointer' }}
                 >
-                  🖼 Create collage
+                  🖼 {collage?.length ? 'Edit collage' : 'Create collage'}
                 </button>
               </div>
               <div className="form-row">
-                {selectedItems.length>0 && (
-                  <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:6 }}>
-                    <button className="btn-ai" style={{ padding:'3px 9px', fontSize:11 }} onClick={suggestOcc} disabled={aiLoading}>{aiLoading?<><span className="spinner"/>…</>:'✨ AI'}</button>
-                  </div>
-                )}
                 <OccasionPicker selected={occasions} onChange={setOccasions} tagGroups={tagGroups} />
-                {aiError && <p style={{ fontSize:10, color:'#c00', marginTop:4 }}>{aiError}</p>}
               </div>
               <div className="form-row">
                 <label>Notes</label>
@@ -1772,7 +1664,8 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
           outfit={{ ...outfit, itemIds: selected }}
           items={items}
           cloudConfig={cloudConfig}
-          onSave={url => { setPhoto(url); setShowCollage(false); }}
+          initialPlacements={collage}
+          onSave={(url, placements) => { setPhoto(url); setCollage(placements); setShowCollage(false); }}
           onClose={() => setShowCollage(false)}
         />
       )}
@@ -1786,10 +1679,11 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  const usedOccasions = useMemo(() => {
-    const all = outfits.flatMap(o=>o.occasions||[]);
-    const allTags = (tagGroups||DEFAULT_TAG_GROUPS).flatMap(g=>g.tags);
-    return ['All', ...allTags.filter(o=>all.includes(o))];
+  const usedGroups = useMemo(() => {
+    const used = new Set(outfits.flatMap(o=>o.occasions||[]));
+    return (tagGroups||DEFAULT_TAG_GROUPS)
+      .map(g => ({ name:g.name, tags:g.tags.filter(t=>used.has(t)) }))
+      .filter(g => g.tags.length > 0);
   }, [outfits, tagGroups]);
   const filtered = outfits.filter(o => {
     if(search && ![o.name||'',o.notes||'',...(o.occasions||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
@@ -1799,10 +1693,17 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
   return (
     <div className="content">
       {editingOutfit && <EditOutfitModal outfit={editingOutfit} items={items} onSave={onSaveOutfit} onClose={()=>setEditingOutfit(null)} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
-      {/* Toolbar */}
+      {/* Toolbar — filters grouped by tag group (Occasion, Season, …) */}
       <div className="toolbar">
-        {usedOccasions.map(occ=>(
-          <button key={occ} className={`cat-chip${filterOcc===occ?' active':''}`} onClick={()=>setFilterOcc(occ)}>{occ}</button>
+        <button className={`cat-chip${filterOcc==='All'?' active':''}`} onClick={()=>setFilterOcc('All')}>All</button>
+        {usedGroups.map(g=>(
+          <React.Fragment key={g.name}>
+            <div className="toolbar-divider" />
+            <span style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.07em', whiteSpace:'nowrap', flexShrink:0, alignSelf:'center' }}>{g.name}</span>
+            {g.tags.map(occ=>(
+              <button key={occ} className={`cat-chip${filterOcc===occ?' active':''}`} onClick={()=>setFilterOcc(occ)}>{occ}</button>
+            ))}
+          </React.Fragment>
         ))}
         <div className="toolbar-divider" />
         <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
@@ -1922,13 +1823,23 @@ function MainApp({ currentUser, onLogout }) {
     if (rows) setItems(p => [...p, ...rows.map(rowToItem)]);
   };
   const handleSaveOutfit = async (formData) => {
+    let saved = null;
     if (formData.id) {
       const { data:row } = await db.from('outfits').update(outfitToRow(formData, currentUser.id)).eq('id', formData.id).select().single();
-      if (row) setOutfits(p => p.map(o => o.id===row.id ? rowToOutfit(row) : o));
+      if (row) saved = rowToOutfit(row);
     } else {
       const { data:row } = await db.from('outfits').insert(outfitToRow(formData, currentUser.id)).select().single();
-      if (row) setOutfits(p => [...p, rowToOutfit(row)]);
+      if (row) saved = rowToOutfit(row);
     }
+    if (!saved) return;
+    // Persist the collage arrangement separately so re-editing restores it.
+    // Best-effort: needs a `collage` jsonb column on the outfits table; if it's
+    // absent the outfit still saves and the layout persists for this session.
+    if (formData.collage !== undefined) {
+      await db.from('outfits').update({ collage: formData.collage }).eq('id', saved.id);
+      saved = { ...saved, collage: formData.collage };
+    }
+    setOutfits(p => formData.id ? p.map(o => o.id===saved.id ? saved : o) : [...p, saved]);
   };
   const handleDeleteOutfit = async (id) => {
     await db.from('outfits').delete().eq('id', id);
