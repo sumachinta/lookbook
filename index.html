@@ -1257,6 +1257,7 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
   const [occasions, setOccasions] = useState([]);
   const [notes, setNotes] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const toggle = id => setSelected(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
   const selectedItems = items.filter(i=>selected.includes(i.id));
@@ -1272,8 +1273,10 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
   );
 
   const saveOutfit = async () => {
-    if(!canSave) return;
+    if(!canSave || saving) return;
+    setSaving(true);
     await onSaveOutfit({ itemIds:selected, occasions, notes, wornCount:0, lastWorn:null });
+    setSaving(false);
     setSelected([]); setOccasions([]); setNotes('');
     setSaved(true); setTimeout(()=>setSaved(false), 2000);
   };
@@ -1346,8 +1349,8 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
           <label>Notes</label>
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="When to wear, tips…" style={{ resize:'vertical', minHeight:52 }} />
         </div>
-        <button className="btn-primary" style={{ width:'100%', padding:'10px' }} onClick={saveOutfit} disabled={!canSave}>
-          {saved ? '✓ Saved!' : `Save outfit (${selected.length} piece${selected.length!==1?'s':''})`}
+        <button className="btn-primary" style={{ width:'100%', padding:'10px' }} onClick={saveOutfit} disabled={!canSave||saving}>
+          {saving ? <><span className="spinner" style={{ borderColor:'var(--bg)', borderTopColor:'transparent' }}/>Generating collage…</> : saved ? '✓ Saved!' : `Save outfit (${selected.length} piece${selected.length!==1?'s':''})`}
         </button>
         {!canSave && <p style={{ fontSize:11, color:'var(--text3)', textAlign:'center', marginTop:6 }}>{selected.length<2?'Select at least 2 pieces':'Pick at least one occasion'}</p>}
       </div>
@@ -1357,15 +1360,170 @@ function BuilderTab({ items, onSaveOutfit, tagGroups, categories }) {
 
 /* ── Outfit Collage Modal ── */
 const COLLAGE_W = 500, COLLAGE_H = 650;
-const PLACEMENT_MAP = {
-  Outerwear: { w:200, h:270, x:100, y:60 },
-  Top:       { w:190, h:220, x:260, y:80 },
-  Bottom:    { w:175, h:270, x:260, y:300 },
-  Shoes:     { w:200, h:150, x:40,  y:470 },
-  Dress:     { w:200, h:380, x:200, y:60 },
-  Accessory: { w:175, h:175, x:30,  y:150 },
-  Other:     { w:150, h:150, x:30,  y:150 },
+// ── Rule-based auto-collage layout ─────────────────────────────
+// See project doc "outfit-collage-rules.md". Canvas is portrait 500×650 with
+// three zones: center silhouette, left rail (outerwear), right rail (extras).
+const COLLAGE_SIZES = {
+  Dress:     { w:210, h:400 },
+  Top:       { w:200, h:210 },
+  Bottom:    { w:200, h:250 },
+  Outerwear: { w:175, h:250 },
+  Shoes:     { w:150, h:115 },
+  Accessory: { w:120, h:120 },
+  Other:     { w:120, h:120 },
 };
+const CORE_CATS = ['Dress','Top','Bottom','Outerwear','Shoes'];
+
+function computeCollageLayout(outfitItems) {
+  const W = COLLAGE_W, H = COLLAGE_H;
+  const sizeFor = c => COLLAGE_SIZES[c] || COLLAGE_SIZES.Other;
+  const centerX = w => Math.round((W - w) / 2);
+  const clampY = (y, h) => Math.max(8, Math.min(H - h - 8, y));
+
+  const withPhoto = (outfitItems || []).filter(i => i.photo);
+  const byCat = c => withPhoto.filter(i => i.category === c);
+  const dresses = byCat('Dress');
+  const tops    = byCat('Top');
+  const bottoms = byCat('Bottom');
+  const outer   = byCat('Outerwear');
+  const shoes   = byCat('Shoes');
+  const accessories = withPhoto.filter(i => !CORE_CATS.includes(i.category)); // bags, jewelry, custom
+
+  const placements = [];
+  const push = (item, w, h, x, y, z) => placements.push({ itemId:item.id, w, h, x, y, z });
+
+  // Accessories-only outfit → centered grid
+  const hasSilhouette = dresses.length || tops.length || bottoms.length || outer.length;
+  if (!hasSilhouette) {
+    const all = [...accessories, ...shoes];
+    if (!all.length) return [];
+    const s = sizeFor('Accessory');
+    const cols = all.length <= 1 ? 1 : 2;
+    const gap = 20;
+    const rows = Math.ceil(all.length / cols);
+    const startX = Math.round((W - (cols * s.w + (cols - 1) * gap)) / 2);
+    const startY = Math.round((H - (rows * s.h + (rows - 1) * gap)) / 2);
+    all.forEach((it, idx) => {
+      const r = Math.floor(idx / cols), c = idx % cols;
+      push(it, s.w, s.h, startX + c * (s.w + gap), startY + r * (s.h + gap), 3);
+    });
+    return placements.map(({ itemId, x, y, w, h }) => ({ itemId, x, y, w, h }));
+  }
+
+  const leftItems = [...outer];
+
+  // ── Center ──
+  if (dresses.length) {
+    const s = sizeFor('Dress');
+    push(dresses[0], s.w, s.h, centerX(s.w), 80, 2);
+    dresses.slice(1).forEach(d => leftItems.push(d));
+  } else {
+    const top = tops[0], bottom = bottoms[0], GAP = 18, topY = 55;
+    if (top && bottom) {
+      const ts = sizeFor('Top'), bs = sizeFor('Bottom');
+      push(top, ts.w, ts.h, centerX(ts.w), topY, 2);
+      push(bottom, bs.w, bs.h, centerX(bs.w), topY + ts.h + GAP, 1);
+    } else if (top) {
+      const ts = sizeFor('Top');
+      push(top, ts.w, ts.h, centerX(ts.w), Math.round((H - ts.h) / 2), 2);
+    } else if (bottom) {
+      const bs = sizeFor('Bottom');
+      push(bottom, bs.w, bs.h, centerX(bs.w), Math.round((H - bs.h) / 2), 1);
+    }
+    tops.slice(1).forEach(t => leftItems.push(t));
+    bottoms.slice(1).forEach(b => leftItems.push(b));
+  }
+
+  // ── Right rail source (non-shoe accessories) ──
+  let rightAcc = [...accessories];
+  // Balance: no outerwear + a lone accessory → move it to fill the empty left rail
+  if (outer.length === 0 && rightAcc.length > 0) leftItems.push(rightAcc.shift());
+  // Overflow: keep at most 3 on the right; spill the rest to the left
+  if (rightAcc.length > 3) rightAcc.splice(3).forEach(x => leftItems.push(x));
+
+  // ── Left rail (vertical stack) ──
+  if (leftItems.length) {
+    const marginTop = 70, marginBottom = 60, railH = H - marginTop - marginBottom;
+    const segH = railH / leftItems.length;
+    leftItems.forEach((it, idx) => {
+      const big = ['Outerwear','Top','Bottom'].includes(it.category);
+      const s = big ? sizeFor('Outerwear') : sizeFor('Accessory');
+      const cy = marginTop + segH * idx + segH / 2;
+      push(it, s.w, s.h, 15, clampY(Math.round(cy - s.h / 2), s.h), 0);
+    });
+  }
+
+  // ── Right rail: accessories top→down, shoes anchored at the bottom ──
+  const shoeSize = sizeFor('Shoes');
+  if (rightAcc.length) {
+    const s = sizeFor('Accessory');
+    const startY = 70;
+    const bottomLimit = shoes.length ? (H - 40 - shoeSize.h - 20) : (H - 60);
+    const step = rightAcc.length > 1 ? Math.max(s.h + 25, (bottomLimit - startY) / rightAcc.length) : 0;
+    rightAcc.forEach((it, idx) => {
+      const x = W - s.w - 15;
+      const y = rightAcc.length > 1 ? Math.round(startY + step * idx) : Math.round((H - s.h) / 2 - 60);
+      push(it, s.w, s.h, x, clampY(y, s.h), 3);
+    });
+  }
+  shoes.forEach((sh, idx) => {
+    const x = idx === 0 ? (W - shoeSize.w - 15) : 15;
+    push(sh, shoeSize.w, shoeSize.h, x, H - 40 - shoeSize.h, 3);
+  });
+
+  // Order back→front so array/DOM paint order matches z-index
+  placements.sort((a, b) => (a.z || 0) - (b.z || 0));
+  return placements.map(({ itemId, x, y, w, h }) => ({ itemId, x, y, w, h }));
+}
+
+// Render a set of placements to a PNG blob off-screen (for auto-baking collages
+// without opening the editor). Swaps image srcs to same-origin blob URLs to
+// avoid canvas tainting, same trick the manual export uses.
+async function renderCollageBlob(placements, items) {
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${COLLAGE_W}px;height:${COLLAGE_H}px;background:#f8f8f5;overflow:hidden;`;
+  const entries = [];
+  for (const p of placements) {
+    const item = items.find(i => i.id === p.itemId);
+    if (item?.photo) entries.push({ p, src: item.photo });
+  }
+  if (!entries.length) return null;
+  const blobUrls = await Promise.all(entries.map(async e => {
+    try { const r = await fetch(e.src, { mode: 'cors' }); return URL.createObjectURL(await r.blob()); }
+    catch { return e.src; }
+  }));
+  const imgEls = entries.map((e, i) => {
+    const el = document.createElement('img');
+    el.src = blobUrls[i];
+    el.style.cssText = `position:absolute;left:${e.p.x}px;top:${e.p.y}px;width:${e.p.w}px;height:${e.p.h}px;object-fit:contain;`;
+    host.appendChild(el);
+    return el;
+  });
+  document.body.appendChild(host);
+  try {
+    await Promise.all(imgEls.map(el => el.complete ? Promise.resolve() : new Promise(res => { el.onload = res; el.onerror = res; })));
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const canvas = await window.html2canvas(host, { width: COLLAGE_W, height: COLLAGE_H, scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#f8f8f5' });
+    return await new Promise(res => canvas.toBlob(res, 'image/png'));
+  } finally {
+    document.body.removeChild(host);
+    blobUrls.forEach(u => { if (u.startsWith('blob:')) URL.revokeObjectURL(u); });
+  }
+}
+
+// Compute layout → render → upload. Returns { url, placements } or null.
+async function generateCollage(outfit, items, cloudConfig) {
+  if (!cloudConfig?.cloudName || !cloudConfig?.uploadPreset) return null;
+  const outfitItems = items.filter(i => (outfit.itemIds || []).includes(i.id) && i.photo);
+  if (!outfitItems.length) return null;
+  const placements = computeCollageLayout(outfitItems);
+  if (!placements.length) return null;
+  const blob = await renderCollageBlob(placements, items);
+  if (!blob) return null;
+  const file = new File([blob], `collage-${Date.now()}.png`, { type: 'image/png' });
+  const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
+  return { url, placements };
+}
 
 function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initialPlacements }) {
   const [placements, setPlacements] = useState([]);
@@ -1376,24 +1534,29 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initi
   const [exportErr, setExportErr] = useState('');
   const canvasRef = useRef(null);
 
+  const outfitPhotoItems = () => items.filter(i => (outfit.itemIds||[]).includes(i.id) && i.photo);
+
   useEffect(() => {
-    const outfitItems = items.filter(i => (outfit.itemIds||[]).includes(i.id) && i.photo);
-    // Restore a previously-saved arrangement when available, so re-editing a
-    // collage continues from where it was left off instead of starting over.
-    const savedById = {};
-    (initialPlacements || []).forEach(p => { savedById[p.itemId] = p; });
-    let accY = 0;
-    setPlacements(outfitItems.map(item => {
-      if (savedById[item.id]) return { ...savedById[item.id], itemId: item.id };
-      const base = PLACEMENT_MAP[item.category] || { w:150, h:150, x:30, y:30 };
-      let p = { itemId: item.id, ...base };
-      if(item.category === 'Accessory' || item.category === 'Other') {
-        p = { ...p, y: base.y + accY };
-        accY += base.h + 10;
-      }
-      return p;
-    }));
+    const outfitItems = outfitPhotoItems();
+    if (initialPlacements?.length) {
+      // Restore a previously-saved arrangement so re-editing continues where it
+      // was left off; auto-place any pieces added since the layout was saved.
+      const savedById = {};
+      initialPlacements.forEach(p => { savedById[p.itemId] = p; });
+      const auto = computeCollageLayout(outfitItems);
+      const autoById = {};
+      auto.forEach(p => { autoById[p.itemId] = p; });
+      setPlacements(outfitItems.map(item =>
+        savedById[item.id]
+          ? { ...savedById[item.id], itemId: item.id }
+          : (autoById[item.id] || { itemId:item.id, w:120, h:120, x:30, y:30 })
+      ));
+    } else {
+      setPlacements(computeCollageLayout(outfitItems));
+    }
   }, []);
+
+  const autoArrange = () => { setSelectedId(null); setPlacements(computeCollageLayout(outfitPhotoItems())); };
 
   const handlePointerDown = (e, itemId) => {
     e.preventDefault();
@@ -1473,7 +1636,10 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initi
           <button style={{ border: 'none', padding: '4px 8px', fontSize: 16 }} onClick={onClose}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, alignSelf: 'flex-start' }}>Drag to move · tap to select · use − + to resize</p>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%', marginBottom:10 }}>
+            <p style={{ fontSize: 11, color: 'var(--text3)' }}>Drag to move · tap to select · use − + to resize</p>
+            <button onClick={autoArrange} style={{ fontSize:11, padding:'4px 10px', border:'1px solid var(--border2)', borderRadius:'var(--radius)', background:'var(--bg2)', color:'var(--text2)', cursor:'pointer', whiteSpace:'nowrap' }}>↻ Auto-arrange</button>
+          </div>
           <div
             ref={canvasRef}
             style={{
@@ -1679,6 +1845,30 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
   const [filterOcc, setFilterOcc] = useState('All');
   const [editingOutfit, setEditingOutfit] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genProg, setGenProg] = useState({ done:0, total:0 });
+  const [busyId, setBusyId] = useState(null);
+  const missingCollages = useMemo(
+    () => outfits.filter(o => !o.photo && items.some(i => (o.itemIds||[]).includes(i.id) && i.photo)),
+    [outfits, items]
+  );
+  const generateOne = async (outfit) => {
+    if (busyId) return;
+    setBusyId(outfit.id);
+    try { const gen = await generateCollage(outfit, items, cloudConfig);
+      if (gen) await onSaveOutfit({ ...outfit, photo:gen.url, collage:gen.placements }); } catch {}
+    setBusyId(null);
+  };
+  const generateMissing = async () => {
+    if (genBusy || !missingCollages.length) return;
+    setGenBusy(true); setGenProg({ done:0, total:missingCollages.length });
+    for (let i=0; i<missingCollages.length; i++) {
+      try { const gen = await generateCollage(missingCollages[i], items, cloudConfig);
+        if (gen) await onSaveOutfit({ ...missingCollages[i], photo:gen.url, collage:gen.placements }); } catch {}
+      setGenProg({ done:i+1, total:missingCollages.length });
+    }
+    setGenBusy(false);
+  };
   const usedGroups = useMemo(() => {
     const used = new Set(outfits.flatMap(o=>o.occasions||[]));
     return (tagGroups||DEFAULT_TAG_GROUPS)
@@ -1708,6 +1898,11 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
         <div className="toolbar-divider" />
         <input className="search-input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" />
         <span style={{ fontSize:11, color:'var(--text3)', whiteSpace:'nowrap', flexShrink:0 }}>{filtered.length} outfit{filtered.length!==1?'s':''}</span>
+        {missingCollages.length > 0 && (
+          <button className="add-btn" style={{ whiteSpace:'nowrap', flexShrink:0 }} onClick={generateMissing} disabled={genBusy}>
+            {genBusy ? <><span className="spinner" style={{ borderColor:'var(--bg)', borderTopColor:'transparent' }}/>{genProg.done}/{genProg.total}…</> : `🖼 Generate ${missingCollages.length} collage${missingCollages.length!==1?'s':''}`}
+          </button>
+        )}
       </div>
 
       <div className="outfits-content">
@@ -1751,6 +1946,11 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
                         )}
                         {outfit.notes && <p style={{ fontSize:11, color:'var(--text2)', fontStyle:'italic', lineHeight:1.6, marginBottom:8 }}>{outfit.notes}</p>}
                         <div style={{ display:'flex', gap:8, paddingTop:8, borderTop:'1px solid var(--border)' }}>
+                          {!outfit.photo && (
+                            <button style={{ flex:1, padding:'6px 9px', fontSize:11 }} disabled={busyId===outfit.id} onClick={()=>generateOne(outfit)}>
+                              {busyId===outfit.id ? <><span className="spinner"/>…</> : '🖼 Generate'}
+                            </button>
+                          )}
                           <button style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>setEditingOutfit(outfit)}>Edit</button>
                           <button className="btn-danger" style={{ flex:1, padding:'6px 9px', fontSize:11 }} onClick={()=>onDeleteOutfit(outfit.id)}>Delete</button>
                         </div>
@@ -1832,12 +2032,24 @@ function MainApp({ currentUser, onLogout }) {
       if (row) saved = rowToOutfit(row);
     }
     if (!saved) return;
-    // Persist the collage arrangement separately so re-editing restores it.
+    // Persist a user-made collage arrangement separately so re-editing restores it.
     // Best-effort: needs a `collage` jsonb column on the outfits table; if it's
     // absent the outfit still saves and the layout persists for this session.
     if (formData.collage !== undefined) {
       await db.from('outfits').update({ collage: formData.collage }).eq('id', saved.id);
       saved = { ...saved, collage: formData.collage };
+    }
+    // Auto-generate a collage when the outfit has no photo yet (new outfits, or
+    // edits where the photo was cleared). Respects any manual photo/collage.
+    if (!saved.photo) {
+      try {
+        const gen = await generateCollage(saved, items, cloudConfig);
+        if (gen) {
+          await db.from('outfits').update({ photo: gen.url }).eq('id', saved.id);
+          await db.from('outfits').update({ collage: gen.placements }).eq('id', saved.id); // best-effort
+          saved = { ...saved, photo: gen.url, collage: gen.placements };
+        }
+      } catch {}
     }
     setOutfits(p => formData.id ? p.map(o => o.id===saved.id ? saved : o) : [...p, saved]);
   };
