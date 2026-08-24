@@ -1169,10 +1169,6 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
           <div className="ai-banner" style={{ marginBottom:12 }}>⚠ Cloudinary not set up — photos will be saved locally only.</div>
         )}
 
-        {AI_BEAUTIFY && (
-          <div className="ai-banner" style={{ marginBottom:12 }}>✨ Each photo is auto-cleaned to a catalog look on #f8f8f5 and tagged with name, color &amp; category. You can edit anything afterward.</div>
-        )}
-
         <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={e=>addFiles(e.target.files)} />
 
         <div

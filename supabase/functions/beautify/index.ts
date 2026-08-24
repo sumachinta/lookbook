@@ -1,22 +1,26 @@
 // Supabase Edge Function: beautify
 // ---------------------------------------------------------------------------
 // Takes one raw clothing photo and returns:
-//   1. a clean catalog-style image on a solid #f8f8f5 background (Gemini 2.5
-//      Flash Image, "Nano Banana"), and
-//   2. a short { name, color, category } tag set (Gemini 2.5 Flash), constrained
-//      to the app's own COLOR_DICT and category list.
+//   1. a clean catalog-style image on a solid #f8f8f5 background, and
+//   2. a short { name, color, category } tag set, constrained to the app's own
+//      COLOR_DICT and category list.
 //
 // The Gemini API key lives ONLY here (server-side) — never in the browser.
-// Set it once with:  supabase secrets set GEMINI_API_KEY=xxxxx
-// Deploy with:       supabase functions deploy beautify
+// Set it once:  supabase secrets set GEMINI_API_KEY=xxxxx
+// Deploy:       supabase functions deploy beautify
 //
 // Request  (POST, JSON): { image: "<data URL or base64>", categories: string[], colors: string[] }
-// Response (JSON):       { image: "data:image/png;base64,…", meta: { name, color, category } | null }
+// Response (JSON):       { image: "data:image/png;base64,…", meta: {name,color,category}|null, debug? }
 // ---------------------------------------------------------------------------
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const IMAGE_MODEL = "gemini-2.5-flash-image";   // beautify (image out)
-const TEXT_MODEL  = "gemini-2.5-flash";         // tagging (JSON out)
+
+// ── Model choice ────────────────────────────────────────────────────────────
+// Nano Banana Pro = best quality (matches the gemini.google.com chat result),
+// ~$0.13–0.24/image. To cut cost ~3x, switch to "gemini-2.5-flash-image"
+// (standard Nano Banana, ~$0.067/image, flatter / less aggressive de-wrinkle).
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
+const TEXT_MODEL  = "gemini-3.6-flash";         // tagging (cheap); 2.5-flash is retired for new projects
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const CORS = {
@@ -31,26 +35,25 @@ const json = (body: unknown, status = 200) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
-// The user's proven beautify prompt, plus a hard background rule.
+// Beautify prompt: the user's proven prompt + explicit ghost-mannequin + de-wrinkle.
 const BEAUTIFY_PROMPT = `Act as a professional e-commerce fashion product image editor. I will provide one reference image of a clothing item, footwear, handbag, jewelry, or accessory.
 Generate a clean catalog-style product image using these rules:
 1. ISOLATE ITEM: Remove the original background, person/model, hanger, props, tags, and unrelated objects. Show only the fashion item.
 2. BACKGROUND: Use a uniform solid #f8f8f5 (RGB 248, 248, 245) background that fills the entire canvas. No gradients, no vignette, no visible studio backdrop, no off-white drift. Use only a very subtle soft shadow if needed.
-3. ALIGNMENT: Straighten and center the item. Present it front-facing, level, balanced, and naturally proportioned. Do not stretch, widen, shorten, or distort it.
-4. DETAILS: Preserve all real details such as straps, sleeves, hems, buttons, pleats, ties, chains, handles, patterns, embroidery, and hardware. Do not crop or erase delicate parts.
-5. MATERIAL: Preserve the authentic color, texture, drape, shine, and material. Remove distracting wrinkles, harsh shadows, glare, and awkward folds without over-smoothing.
-6. STANDARD FRAMING: Keep the entire item visible with consistent padding and scale for its category. Normally leave 5-8% outer padding for garments and 8-12% for small accessories. Avoid excessive empty space or overly tight cropping.
-7. CATEGORY PROPORTIONS: Full-length garments such as dresses, pants, and long skirts should use most of the image height. Tops and outerwear should have balanced width and height. Shorts and short skirts must remain visibly shorter and must not be enlarged to resemble full-length bottoms. Shoes should show the complete pair; earrings should show the complete matching pair; bags should include handles and neatly arranged straps.
+3. 3D FORM (IMPORTANT): Render garments as if worn on an INVISIBLE MANNEQUIN — a ghost-mannequin / hollow-body effect with natural three-dimensional body shape and volume. The piece should stand as if on an unseen body: collar, shoulders, sleeves, and torso filled out and structured. Do NOT present it as a flat lay lying down. (Shoes, bags, and jewelry stay in their natural upright product view.)
+4. ALIGNMENT: Straighten and center the item, front-facing, level, balanced, and naturally proportioned. Do not stretch, widen, shorten, or distort it.
+5. MATERIAL & FINISH: Remove ALL wrinkles, creases, and awkward folds for a crisp, freshly-pressed, brand-new look. Remove harsh shadows and glare. Preserve the authentic color, texture, drape, weave, and material — do not over-smooth into a plastic or painted look.
+6. DETAILS: Preserve all real details such as zippers, straps, sleeves, hems, buttons, pleats, ties, chains, handles, patterns, embroidery, logos, and hardware. Do not crop or erase delicate parts.
+7. STANDARD FRAMING: Keep the entire item visible with consistent padding and scale for its category. Leave 5-8% outer padding for garments, 8-12% for small accessories. Avoid excessive empty space or overly tight cropping.
+8. CATEGORY PROPORTIONS: Full-length garments (dresses, pants, long skirts) use most of the image height. Tops and outerwear have balanced width and height. Shorts and short skirts must remain visibly shorter and must not be enlarged to resemble full-length bottoms. Shoes show the complete pair; earrings show the complete matching pair; bags include handles and neatly arranged straps.
 The result should look like every item belongs to the same professionally photographed wardrobe catalog, regardless of the original source image.`;
 
-// Pull raw base64 + mime out of a data URL or a bare base64 string.
 function parseImage(input: string): { data: string; mime: string } {
   const m = /^data:([^;]+);base64,(.*)$/s.exec(input || "");
   if (m) return { mime: m[1], data: m[2] };
   return { mime: "image/jpeg", data: input || "" };
 }
 
-// Find the first inline image part in a Gemini response (handles camel/snake).
 function findImagePart(resp: any): { data: string; mime: string } | null {
   const parts = resp?.candidates?.[0]?.content?.parts ?? [];
   for (const p of parts) {
@@ -72,13 +75,20 @@ async function beautify(dataB64: string, mime: string): Promise<{ data: string; 
           { inline_data: { mime_type: mime, data: dataB64 } },
         ],
       }],
-      generationConfig: { responseModalities: ["IMAGE"] },
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
     }),
   });
-  if (!res.ok) throw new Error(`image model ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    console.error("[beautify] image model error", res.status, body);
+    throw new Error(`image model ${res.status}: ${body}`);
+  }
   const out = await res.json();
   const img = findImagePart(out);
-  if (!img) throw new Error("image model returned no image");
+  if (!img) {
+    console.error("[beautify] no image in response", JSON.stringify(out).slice(0, 800));
+    throw new Error("image model returned no image");
+  }
   return img;
 }
 
@@ -89,48 +99,50 @@ async function tag(
   colors: string[],
 ): Promise<{ name: string; color: string; category: string } | null> {
   const prompt =
-    `You are tagging a single fashion product photo for a wardrobe catalog. Return only the fields requested.\n` +
-    `- name: a short 2-4 word product name in Title Case (e.g. "Pink Ribbed Blouse"). No brand names, no punctuation.\n` +
-    `- color: the single most dominant color. Choose exactly one from the allowed list. Use "Multicolor" or "Print" only if there is genuinely no single dominant color.\n` +
-    `- category: choose exactly one from the allowed list that best fits the item.`;
-  const res = await fetch(`${GEMINI}/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mime, data: dataB64 } },
-        ],
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            name: { type: "STRING" },
-            color: { type: "STRING", enum: colors },
-            category: { type: "STRING", enum: categories },
-          },
-          required: ["name", "color", "category"],
-          propertyOrdering: ["name", "color", "category"],
-        },
-        temperature: 0.2,
-      },
-    }),
-  });
-  if (!res.ok) return null; // tagging is best-effort; never block the image
-  const out = await res.json();
-  const text = out?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
+    `You are tagging one fashion product photo for a wardrobe catalog. Reply with ONLY a JSON object, no markdown, no extra text, in this exact shape:\n` +
+    `{"name": string, "color": string, "category": string}\n\n` +
+    `name = a short 2-4 word product name in Title Case (e.g. "Beige Fleece Jacket"). No brand names, no punctuation.\n` +
+    `category = choose EXACTLY ONE from this list: ${JSON.stringify(categories)}\n` +
+    `color = the single most dominant color, choose EXACTLY ONE from this list: ${JSON.stringify(colors)}. Use "Multicolor" or "Print" only if there is genuinely no single dominant color.`;
+  let res: Response;
   try {
-    const meta = JSON.parse(text);
+    res = await fetch(`${GEMINI}/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mime, data: dataB64 } },
+          ],
+        }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+      }),
+    });
+  } catch (err) {
+    console.error("[tag] fetch threw", String(err));
+    return null;
+  }
+  if (!res.ok) {
+    console.error("[tag] http error", res.status, await res.text());
+    return null;
+  }
+  const out = await res.json();
+  const text = out?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("").trim() ?? "";
+  if (!text) {
+    console.error("[tag] empty text; finishReason:", out?.candidates?.[0]?.finishReason, JSON.stringify(out).slice(0, 500));
+    return null;
+  }
+  try {
+    const meta = JSON.parse(text.replace(/^```json\s*|\s*```$/g, "")); // strip accidental fences
     return {
       name: String(meta.name ?? "").slice(0, 60),
       color: colors.includes(meta.color) ? meta.color : "",
       category: categories.includes(meta.category) ? meta.category : (categories[0] ?? "Other"),
     };
-  } catch {
+  } catch (err) {
+    console.error("[tag] JSON parse failed. raw text:", text.slice(0, 300));
     return null;
   }
 }
@@ -151,13 +163,11 @@ Deno.serve(async (req: Request) => {
   const { data, mime } = parseImage(image);
 
   try {
-    // 1) Beautify (the expensive call). If this fails, the whole request fails
-    //    and the client falls back to the original photo.
-    const clean = await beautify(data, mime);
-    // 2) Tag the CLEANED image (best colour read on a neutral background).
-    const meta = await tag(clean.data, clean.mime, cats, cols);
-    return json({ image: `data:${clean.mime};base64,${clean.data}`, meta });
+    const clean = await beautify(data, mime);          // expensive; failure => 502 => client keeps original
+    const meta = await tag(clean.data, clean.mime, cats, cols); // best-effort
+    return json({ image: `data:${clean.mime};base64,${clean.data}`, meta, debug: { taggedOk: !!meta } });
   } catch (err) {
+    console.error("[serve] failed", String(err?.message ?? err));
     return json({ error: String(err?.message ?? err) }, 502);
   }
 });
