@@ -41,7 +41,7 @@ Generate a clean catalog-style product image using these rules:
 1. ISOLATE ITEM: Remove the original background, person/model, hanger, props, tags, and unrelated objects. Show only the fashion item.
 2. BACKGROUND: Use a uniform solid #f8f8f5 (RGB 248, 248, 245) background that fills the entire canvas. No gradients, no vignette, no visible studio backdrop, no off-white drift. Use only a very subtle soft shadow if needed.
 3. 3D FORM (IMPORTANT): Render garments as if worn on an INVISIBLE MANNEQUIN — a ghost-mannequin / hollow-body effect with natural three-dimensional body shape and volume. The piece should stand as if on an unseen body: collar, shoulders, sleeves, and torso filled out and structured. Do NOT present it as a flat lay lying down. (Shoes, bags, and jewelry stay in their natural upright product view.)
-4. ALIGNMENT: Straighten and center the item, front-facing, level, balanced, and naturally proportioned. Do not stretch, widen, shorten, or distort it.
+4. CAMERA ANGLE (CRITICAL): Show the item in a strict straight-on, dead-center FRONT view, with the camera perpendicular to the garment. Absolutely NO three-quarter angle, NO side view, NO rotated, tilted, diagonal, or perspective view. The garment must be square to the frame and symmetric: shoulders level and equal in width, left and right sides mirroring each other, sleeves falling evenly on both sides. Center and straighten it; do not stretch, widen, shorten, or distort it.
 5. MATERIAL & FINISH: Remove ALL wrinkles, creases, and awkward folds for a crisp, freshly-pressed, brand-new look. Remove harsh shadows and glare. Preserve the authentic color, texture, drape, weave, and material — do not over-smooth into a plastic or painted look.
 6. DETAILS: Preserve all real details such as zippers, straps, sleeves, hems, buttons, pleats, ties, chains, handles, patterns, embroidery, logos, and hardware. Do not crop or erase delicate parts.
 7. STANDARD FRAMING: Keep the entire item visible with consistent padding and scale for its category. Leave 5-8% outer padding for garments, 8-12% for small accessories. Avoid excessive empty space or overly tight cropping.
@@ -52,6 +52,25 @@ function parseImage(input: string): { data: string; mime: string } {
   const m = /^data:([^;]+);base64,(.*)$/s.exec(input || "");
   if (m) return { mime: m[1], data: m[2] };
   return { mime: "image/jpeg", data: input || "" };
+}
+
+// Base64-encode bytes in chunks (avoids arg-count overflow on large buffers).
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(bin);
+}
+
+// Fetch an image URL server-side (used by the backfill) and return a data URL.
+async function fetchImageAsDataUrl(url: string): Promise<string> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`could not fetch imageUrl (${r.status})`);
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  const mime = r.headers.get("content-type") || "image/jpeg";
+  return `data:${mime};base64,${bytesToBase64(bytes)}`;
 }
 
 function findImagePart(resp: any): { data: string; mime: string } | null {
@@ -75,7 +94,12 @@ async function beautify(dataB64: string, mime: string): Promise<{ data: string; 
           { inline_data: { mime_type: mime, data: dataB64 } },
         ],
       }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+      // Pin a consistent portrait shape so every catalog image is the same
+      // aspect ratio. imageSize "1K" keeps cost/size down (we downscale to 800 anyway).
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        imageConfig: { aspectRatio: "3:4", imageSize: "1K" },
+      },
     }),
   });
   if (!res.ok) {
@@ -155,12 +179,18 @@ Deno.serve(async (req: Request) => {
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "invalid JSON body" }, 400); }
 
-  const { image, categories, colors } = body ?? {};
-  if (!image) return json({ error: "missing 'image'" }, 400);
+  const { image, imageUrl, categories, colors } = body ?? {};
+  if (!image && !imageUrl) return json({ error: "missing 'image' or 'imageUrl'" }, 400);
   const cats = Array.isArray(categories) && categories.length ? categories : ["Top","Bottom","Shoes","Outerwear","Accessory","Dress","Other"];
   const cols = Array.isArray(colors) && colors.length ? colors : ["Black","White","Gray","Beige","Navy","Blue","Green","Red","Pink","Purple","Brown","Multicolor","Print"];
 
-  const { data, mime } = parseImage(image);
+  let source: string;
+  try {
+    source = image || await fetchImageAsDataUrl(imageUrl);
+  } catch (err) {
+    return json({ error: String(err?.message ?? err) }, 400);
+  }
+  const { data, mime } = parseImage(source);
 
   try {
     const clean = await beautify(data, mime);          // expensive; failure => 502 => client keeps original

@@ -799,6 +799,47 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
     } catch(err) { setImportError('Import failed: '+err.message); }
     setImporting(false);
   };
+
+  // ── Re-clean all images (Phase 4 backfill) ──────────────────
+  const [bf, setBf] = useState({ running:false, done:0, total:0, errors:0, current:'', finished:false });
+  const backfillAll = async () => {
+    const targets = (items||[]).filter(i => i.photo && /^https?:/.test(i.photo));
+    if (!targets.length) { alert('No items with uploaded photos to re-clean.'); return; }
+    const est = (targets.length * 0.20).toFixed(2);
+    if (!window.confirm(`Re-clean ${targets.length} images through the AI (roughly $${est}, ~$0.13–0.24 each).\n\nThis replaces each item's photo with a fresh catalog version and fills in any blank name/color. It can take several minutes — keep this tab open. Continue?`)) return;
+    setBf({ running:true, done:0, total:targets.length, errors:0, current:'', finished:false });
+    for (let i=0;i<targets.length;i++){
+      const it = targets[i];
+      setBf(b=>({...b, done:i, current: it.name||'item' }));
+      try {
+        const { data:{ session } } = await db.auth.getSession();
+        const res = await fetch(BEAUTIFY_URL, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${session?.access_token||SUPABASE_ANON}`, 'apikey':SUPABASE_ANON },
+          body: JSON.stringify({ imageUrl: it.photo, categories: cats, colors: COLOR_DICT }),
+        });
+        if(!res.ok) throw new Error('beautify '+res.status);
+        const out = await res.json();
+        if(!out.image) throw new Error('no image');
+        const file = await dataUrlToFile(out.image, (it.name||'item')+'.png');
+        const resized = await resizeImageFile(file, 800);
+        const url = await uploadToCloudinary(resized, CLOUD_NAME, UPLOAD_PRESET);
+        const patch = { photo: url };
+        const m = out.meta;
+        if (m) {
+          const filenameLike = !it.name || /^IMG[_-]/i.test(it.name) || /\.(jpe?g|png|heic|webp)$/i.test(it.name);
+          if (filenameLike && m.name) patch.name = m.name;
+          if (!it.color && m.color) patch.color = m.color;
+        }
+        await db.from('items').update(patch).eq('id', it.id);
+      } catch(err) {
+        setBf(b=>({...b, errors:b.errors+1}));
+      }
+    }
+    setBf(b=>({...b, running:false, done:b.total, current:'', finished:true }));
+    setTimeout(()=>window.location.reload(), 1500);
+  };
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" style={{ width:380 }} onClick={e=>e.stopPropagation()}>
@@ -873,6 +914,22 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
           <input ref={importRef} type="file" accept=".json" style={{display:'none'}} onChange={handleImport} />
           {importError && <p style={{fontSize:11,color:'#c00',marginTop:6}}>{importError}</p>}
           <p style={{fontSize:10,color:'var(--text3)',marginTop:8,lineHeight:1.6}}>Export saves your wardrobe as JSON. Import restores from a previous export.</p>
+        </div>
+
+        <hr style={{ border:'none', borderTop:'1px solid var(--border)', margin:'18px 0' }} />
+        <div>
+          <p style={{ fontWeight:600, fontSize:12, marginBottom:7, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--text2)' }}>Maintenance</p>
+          <button style={{ width:'100%', fontSize:12 }} onClick={backfillAll} disabled={bf.running}>
+            {bf.running ? <><span className="spinner"/>Re-cleaning {bf.done+1}/{bf.total}…</> : bf.finished ? '✓ Done — reloading…' : '✨ Re-clean all images'}
+          </button>
+          {bf.running && (
+            <p style={{fontSize:10,color:'var(--text3)',marginTop:8,lineHeight:1.6}}>
+              {bf.current ? `Now: ${bf.current}` : ''}{bf.errors?` · ${bf.errors} failed`:''}<br/>Keep this tab open until it finishes.
+            </p>
+          )}
+          {!bf.running && (
+            <p style={{fontSize:10,color:'var(--text3)',marginTop:8,lineHeight:1.6}}>Re-runs every item's photo through the current AI catalog cleanup (background, front view, 3:4). Replaces each photo and fills blank name/color. Costs ~$0.13–0.24 per item.</p>
+          )}
         </div>
       </div>
     </div>
