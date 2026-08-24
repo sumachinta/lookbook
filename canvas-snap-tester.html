@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canvas Snap Tester</title>
+<style>
+  :root {
+    --bg: #faf9f7; --bg2: #f2f0ec; --panel:#fff; --text:#191816; --text2:#7a756d;
+    --text3:#b5b0a8; --border: rgba(0,0,0,0.09); --border2: rgba(0,0,0,0.16);
+    --accent:#5060f0; --good:#2a8a4a; --warn:#c07a10; --bad:#c03030; --snapbg:#f8f8f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111110; --bg2:#1b1a18; --panel:#191816; --text:#eeebe5; --text2:#908b82;
+      --text3:#4e4a44; --border: rgba(255,255,255,0.09); --border2: rgba(255,255,255,0.16); }
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg);
+    color:var(--text); line-height:1.5; padding:20px; max-width:1100px; margin:0 auto; }
+  h1 { font-size:20px; font-weight:600; letter-spacing:-0.01em; margin-bottom:4px; }
+  .sub { color:var(--text2); font-size:13px; margin-bottom:18px; }
+  .controls { display:flex; flex-wrap:wrap; gap:20px 28px; align-items:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:14px 18px; margin-bottom:16px; position:sticky; top:10px; z-index:5; }
+  .ctrl { display:flex; flex-direction:column; gap:4px; min-width:180px; }
+  .ctrl label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--text3); }
+  .ctrl .val { font-weight:600; color:var(--text); }
+  input[type=range]{ width:200px; accent-color:var(--accent); }
+  .check { flex-direction:row; align-items:center; gap:7px; min-width:0; }
+  .check input { accent-color:var(--accent); width:16px; height:16px; }
+  .check label { text-transform:none; letter-spacing:0; font-size:13px; color:var(--text); font-weight:400; }
+  .drop { border:2px dashed var(--border2); border-radius:12px; padding:34px; text-align:center;
+    color:var(--text3); font-size:14px; cursor:pointer; transition:.15s; background:var(--panel); margin-bottom:20px; }
+  .drop.over { border-color:var(--accent); color:var(--accent); background:var(--bg2); }
+  .drop strong { color:var(--text); }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:14px; margin-bottom:16px; }
+  .card h3 { font-size:13px; font-weight:600; margin-bottom:10px; word-break:break-all; }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .pair{ grid-template-columns:1fr; } }
+  .imgwrap { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:
+    repeating-conic-gradient(#0000000d 0% 25%, transparent 0% 50%) 50% / 18px 18px; }
+  .imgwrap .cap { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;
+    color:var(--text3); padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); }
+  canvas { display:block; width:100%; height:auto; }
+  .stats { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; }
+  .badge { padding:3px 9px; border-radius:20px; font-weight:600; font-size:11px; }
+  .badge.ok   { background:color-mix(in srgb,var(--good) 15%,transparent); color:var(--good); }
+  .badge.warn { background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
+  .badge.bad  { background:color-mix(in srgb,var(--bad) 15%,transparent); color:var(--bad); }
+  .badge.info { background:var(--bg2); color:var(--text2); }
+  .verdict { font-size:13px; margin-top:10px; padding:9px 12px; border-radius:8px; line-height:1.5; }
+  .verdict.ok   { background:color-mix(in srgb,var(--good) 10%,transparent); }
+  .verdict.warn { background:color-mix(in srgb,var(--warn) 12%,transparent); }
+  .verdict.bad  { background:color-mix(in srgb,var(--bad) 10%,transparent); }
+  .dl { margin-top:10px; font-size:12px; font-weight:600; color:var(--accent);
+    background:none; border:1px solid var(--border2); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  .hint { font-size:12px; color:var(--text2); background:var(--bg2); border-radius:8px;
+    padding:10px 14px; margin-bottom:18px; line-height:1.6; }
+  .swatch { display:inline-block; width:11px; height:11px; border-radius:3px; border:1px solid var(--border2);
+    vertical-align:-1px; margin-right:3px; }
+</style>
+</head>
+<body>
+  <h1>Canvas Snap Tester</h1>
+  <p class="sub">Drop your <strong>Gemini-beautified</strong> catalog images here to see the free background snap to <span class="swatch" style="background:#f8f8f5"></span>#f8f8f5 — and which images it can't handle cleanly.</p>
+
+  <div class="hint">
+    This runs the exact algorithm proposed for the app: sample the corner background, flood-fill inward from the edges within a tolerance, repaint that region to #f8f8f5. Interior pixels (buttons, light panels) are never touched because they aren't connected to the edge. Use the tolerance slider to find a value that snaps the background without eating the item, then watch the verdict badges — anything marked <span class="badge bad" style="font-size:10px">needs real removal</span> is a candidate for the Cloudinary fallback later.
+  </div>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>Tolerance — <span class="val" id="tolVal">32</span></label>
+      <input type="range" id="tol" min="4" max="120" value="32">
+    </div>
+    <div class="ctrl check">
+      <input type="checkbox" id="mask">
+      <label for="mask">Show snapped region in magenta</label>
+    </div>
+    <div class="ctrl check">
+      <input type="checkbox" id="feather" checked>
+      <label for="feather">Soften edge (anti-alias cleanup)</label>
+    </div>
+  </div>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="image/*" multiple hidden>
+    <strong>Click to choose images</strong> or drag &amp; drop &nbsp;·&nbsp; several at once is fine
+  </label>
+
+  <div id="out"></div>
+
+<script>
+const TARGET = [248,248,245]; // #f8f8f5
+const els = { drop:document.getElementById('drop'), file:document.getElementById('file'),
+  out:document.getElementById('out'), tol:document.getElementById('tol'),
+  tolVal:document.getElementById('tolVal'), mask:document.getElementById('mask'),
+  feather:document.getElementById('feather') };
+const loaded = []; // {name, img}
+
+els.tol.addEventListener('input', ()=>{ els.tolVal.textContent = els.tol.value; renderAll(); });
+els.mask.addEventListener('change', renderAll);
+els.feather.addEventListener('change', renderAll);
+
+els.file.addEventListener('change', e => addFiles(e.target.files));
+['dragenter','dragover'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.remove('over');}));
+els.drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+function addFiles(list){
+  const imgs = [...list].filter(f=>f.type.startsWith('image/'));
+  let pending = imgs.length;
+  if(!pending) return;
+  imgs.forEach(f=>{
+    const img = new Image();
+    img.onload = ()=>{ loaded.push({name:f.name, img}); if(--pending===0) renderAll(); };
+    img.src = URL.createObjectURL(f);
+  });
+}
+
+function dist(r,g,b, c){ const dr=r-c[0], dg=g-c[1], db=b-c[2]; return Math.sqrt(dr*dr+dg*dg+db*db); }
+
+// Sample average background color from the four corners (patchsize x patchsize each)
+function sampleBg(data, W, H){
+  const p = Math.max(4, Math.round(Math.min(W,H)*0.04));
+  const spots = [[0,0],[W-p,0],[0,H-p],[W-p,H-p]];
+  let r=0,g=0,b=0,n=0;
+  for(const [sx,sy] of spots){
+    for(let y=sy; y<sy+p; y++) for(let x=sx; x<sx+p; x++){
+      const i=(y*W+x)*4; r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++;
+    }
+  }
+  return [r/n, g/n, b/n];
+}
+
+// Flood-fill background from edges. Returns Uint8Array mask (1 = background).
+function floodBg(data, W, H, bg, tol){
+  const mask = new Uint8Array(W*H);
+  const stack = new Int32Array(W*H);
+  let sp = 0;
+  const push = idx => { if(!mask[idx]){ const i=idx*4;
+    if(dist(data[i],data[i+1],data[i+2], bg) <= tol){ mask[idx]=1; stack[sp++]=idx; } } };
+  for(let x=0;x<W;x++){ push(x); push((H-1)*W+x); }
+  for(let y=0;y<H;y++){ push(y*W); push(y*W+W-1); }
+  while(sp>0){
+    const idx = stack[--sp];
+    const x = idx % W, y = (idx - x)/W;
+    if(x>0)   push(idx-1);
+    if(x<W-1) push(idx+1);
+    if(y>0)   push(idx-W);
+    if(y<H-1) push(idx+W);
+  }
+  return mask;
+}
+
+// Analyse the boundary between item and background for low-contrast risk.
+function analyse(data, W, H, mask, bg, tol){
+  let bgCount=0, boundary=0, weakBoundary=0;
+  for(let i=0;i<W*H;i++) if(mask[i]) bgCount++;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const idx=y*W+x;
+    if(mask[idx]) continue;
+    // item pixel touching a background pixel = boundary
+    const touch = (x>0&&mask[idx-1])||(x<W-1&&mask[idx+1])||(y>0&&mask[idx-W])||(y<H-1&&mask[idx+W]);
+    if(!touch) continue;
+    boundary++;
+    const i=idx*4;
+    const d = dist(data[i],data[i+1],data[i+2], bg);
+    if(d < tol*1.6) weakBoundary++; // item edge nearly as pale as background
+  }
+  // how far the fill reached toward the center (leak detector)
+  const cx0=Math.floor(W*0.35), cx1=Math.ceil(W*0.65), cy0=Math.floor(H*0.35), cy1=Math.ceil(H*0.65);
+  let centreBg=0, centreTot=0;
+  for(let y=cy0;y<cy1;y++) for(let x=cx0;x<cx1;x++){ centreTot++; if(mask[y*W+x]) centreBg++; }
+  return {
+    bgPct: bgCount/(W*H),
+    weakPct: boundary ? weakBoundary/boundary : 0,
+    centrePct: centreTot ? centreBg/centreTot : 0,
+  };
+}
+
+function verdict(a){
+  if(a.centrePct > 0.03)
+    return {cls:'bad', label:'needs real removal', text:'The fill leaked into the item — the piece is too close to the background shade for a clean snap. This is a Cloudinary-fallback candidate.'};
+  if(a.weakPct > 0.35)
+    return {cls:'bad', label:'needs real removal', text:'A large part of the item edge is nearly as pale as the background, so the outline will look soft or get nibbled. Fallback candidate.'};
+  if(a.weakPct > 0.15)
+    return {cls:'warn', label:'check the edge', text:'Some of the item edge is low-contrast against the background. Snap looks mostly fine — glance at the outline before trusting it.'};
+  if(a.bgPct < 0.08)
+    return {cls:'warn', label:'little background found', text:'Very little background was detected — the item may be cropped tight, or the corners aren’t background. Lower the tolerance or re-check the source image.'};
+  return {cls:'ok', label:'clean snap', text:'Background snapped cleanly to #f8f8f5 with a crisp item edge. No fallback needed.'};
+}
+
+function processOne(entry){
+  const { img, name } = entry;
+  const scale = Math.min(1, 900 / Math.max(img.width, img.height));
+  const W = Math.max(1, Math.round(img.width*scale)), H = Math.max(1, Math.round(img.height*scale));
+  const src = document.createElement('canvas'); src.width=W; src.height=H;
+  const sctx = src.getContext('2d', {willReadFrequently:true});
+  sctx.drawImage(img,0,0,W,H);
+  const id = sctx.getImageData(0,0,W,H);
+  const data = id.data;
+
+  const tol = +els.tol.value;
+  const bg = sampleBg(data, W, H);
+  const mask = floodBg(data, W, H, bg, tol);
+  const a = analyse(data, W, H, mask, bg, tol);
+  const v = verdict(a);
+
+  // Build output image
+  const out = document.createElement('canvas'); out.width=W; out.height=H;
+  const octx = out.getContext('2d');
+  const outId = octx.createImageData(W,H);
+  const od = outId.data;
+  const showMask = els.mask.checked;
+  const feather = els.feather.checked;
+  for(let idx=0; idx<W*H; idx++){
+    const i=idx*4;
+    if(mask[idx]){
+      if(showMask){ od[i]=255; od[i+1]=0; od[i+2]=255; od[i+3]=255; }
+      else { od[i]=TARGET[0]; od[i+1]=TARGET[1]; od[i+2]=TARGET[2]; od[i+3]=255; }
+    } else {
+      od[i]=data[i]; od[i+1]=data[i+1]; od[i+2]=data[i+2]; od[i+3]=255;
+    }
+  }
+  // Edge feather: item pixels adjacent to background get blended toward #f8f8f5 to kill halos
+  if(feather && !showMask){
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const idx=y*W+x;
+      if(mask[idx]) continue;
+      const near=(x>0&&mask[idx-1])||(x<W-1&&mask[idx+1])||(y>0&&mask[idx-W])||(y<H-1&&mask[idx+W]);
+      if(!near) continue;
+      const i=idx*4;
+      const d = dist(data[i],data[i+1],data[i+2], bg);
+      if(d < tol*1.4){ // pale halo pixel — blend toward target
+        const t=0.6;
+        od[i]=Math.round(data[i]*(1-t)+TARGET[0]*t);
+        od[i+1]=Math.round(data[i+1]*(1-t)+TARGET[1]*t);
+        od[i+2]=Math.round(data[i+2]*(1-t)+TARGET[2]*t);
+      }
+    }
+  }
+  octx.putImageData(outId,0,0);
+
+  // Card
+  const card = document.createElement('div'); card.className='card';
+  const bgHex = '#'+bg.map(c=>Math.round(c).toString(16).padStart(2,'0')).join('');
+  card.innerHTML = `
+    <h3>${name}</h3>
+    <div class="pair">
+      <div class="imgwrap"><div class="cap">Original</div></div>
+      <div class="imgwrap"><div class="cap">Snapped${showMask?' · mask':''}</div></div>
+    </div>
+    <div class="stats">
+      <span class="badge ${v.cls==='ok'?'ok':v.cls==='warn'?'warn':'bad'}">${v.label}</span>
+      <span class="badge info">detected bg <span class="swatch" style="background:${bgHex}"></span>${bgHex}</span>
+      <span class="badge info">background ${(a.bgPct*100).toFixed(0)}% of image</span>
+      <span class="badge info">low-contrast edge ${(a.weakPct*100).toFixed(0)}%</span>
+    </div>
+    <div class="verdict ${v.cls==='ok'?'ok':v.cls==='warn'?'warn':'bad'}">${v.text}</div>
+  `;
+  card.querySelectorAll('.imgwrap')[0].appendChild(src);
+  card.querySelectorAll('.imgwrap')[1].appendChild(out);
+  const dl = document.createElement('button'); dl.className='dl'; dl.textContent='⬇ Download snapped PNG';
+  dl.onclick = ()=>{ const a2=document.createElement('a'); a2.download=name.replace(/\.[^.]+$/,'')+'_snapped.png'; a2.href=out.toDataURL('image/png'); a2.click(); };
+  card.appendChild(dl);
+  return card;
+}
+
+function renderAll(){
+  els.out.innerHTML='';
+  if(!loaded.length) return;
+  for(const entry of loaded) els.out.appendChild(processOne(entry));
+}
+</script>
+</body>
+</html>

@@ -460,6 +460,13 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 const CLOUD_NAME    = 'ddx2mn7bx';
 const UPLOAD_PRESET = 'outfit_uploads';
 
+// ── AI beautify + auto-tag (Supabase Edge Function) ───────────
+// Deploy supabase/functions/beautify and run: supabase secrets set GEMINI_API_KEY=…
+// AI_BEAUTIFY=false skips the AI step entirely (raw upload, filename as name).
+// If the function errors, uploads still work — they just fall back to the raw photo.
+const AI_BEAUTIFY  = true;
+const BEAUTIFY_URL = `${SUPABASE_URL}/functions/v1/beautify`;
+
 // ── Data mappers (camelCase ↔ snake_case) ─────────────────────
 function rowToItem(r) {
   return { id:r.id, name:r.name, category:r.category, color:r.color||'', brand:r.brand||'', cost:r.cost,
@@ -562,6 +569,50 @@ async function uploadToCloudinary(file, cloudName, uploadPreset) {
   const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method:'POST', body:formData });
   if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error?.message || `Cloudinary error (${res.status})`); }
   return (await res.json()).secure_url;
+}
+
+// ── AI beautify helpers ───────────────────────────────────────
+const fileToDataUrl = file => new Promise((res, rej) => {
+  const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+});
+async function dataUrlToFile(dataUrl, name) {
+  const blob = await (await fetch(dataUrl)).blob();
+  return new File([blob], name || `item-${Date.now()}.png`, { type: blob.type || 'image/png' });
+}
+
+// Send a raw photo to the beautify Edge Function → clean catalog image + tags.
+// Always resolves: on any failure it returns the ORIGINAL file so the upload
+// still succeeds. Returns { file, meta:{name,color,category}|null, warn }.
+async function beautifyImage(rawFile, categories) {
+  if (!AI_BEAUTIFY) return { file: rawFile, meta: null, warn: '' };
+  try {
+    const image = await fileToDataUrl(rawFile);
+    const { data:{ session } } = await db.auth.getSession();
+    const res = await fetch(BEAUTIFY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || SUPABASE_ANON}`,
+        'apikey': SUPABASE_ANON,
+      },
+      body: JSON.stringify({ image, categories: categories || DEFAULT_CATEGORIES, colors: COLOR_DICT }),
+    });
+    if (!res.ok) return { file: rawFile, meta: null, warn: `AI skipped (${res.status}) — used original photo.` };
+    const out = await res.json();
+    const file = out.image ? await dataUrlToFile(out.image, ((out.meta && out.meta.name) || 'item') + '.png') : rawFile;
+    let meta = out.meta || null;
+    if (meta) {
+      const cats = categories || DEFAULT_CATEGORIES;
+      meta = {
+        name: String(meta.name || '').slice(0, 60),
+        color: COLOR_DICT.includes(meta.color) ? meta.color : '',
+        category: cats.includes(meta.category) ? meta.category : (cats[0] || 'Other'),
+      };
+    }
+    return { file, meta, warn: '' };
+  } catch (err) {
+    return { file: rawFile, meta: null, warn: 'AI unavailable — used original photo.' };
+  }
 }
 
 function OccasionPicker({ selected, onChange, tagGroups }) {
@@ -916,20 +967,33 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
   const handleFile = async e => {
     const rawFile = e.target.files[0]; if(!rawFile) return;
     setUploadErr('');
+    setUploading(true); setUploadPct(10);
+
+    // AI beautify + auto-tag (falls back to the original photo on any failure)
+    const { file: beautified, meta, warn } = await beautifyImage(rawFile, cats);
+    if (warn) setUploadErr(warn);
+    setUploadPct(40);
 
     // Resize to max 800px to reduce storage and upload time
-    const file = await resizeImageFile(rawFile, 800);
+    const file = await resizeImageFile(beautified, 800);
 
     // Immediate local preview
-    const localPreview = await new Promise(res => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.readAsDataURL(file); });
+    const localPreview = await fileToDataUrl(file);
     set('photo', localPreview);
 
-    if(!cloudinaryReady) { setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); return; }
+    // Pre-fill empty fields from the AI tags (never overwrite what you've typed)
+    if (meta) setForm(f => ({
+      ...f,
+      name: (f.name && f.name.trim()) ? f.name : (meta.name || f.name),
+      color: f.color || meta.color || '',
+      category: meta.category || f.category,
+    }));
+
+    if(!cloudinaryReady) { setUploading(false); setUploadPct(0); if(!warn) setUploadErr('⚠ Cloudinary not set up. Photo saved locally only.'); return; }
 
     // Upload
-    setUploading(true); setUploadPct(20);
     try {
-      setUploadPct(50);
+      setUploadPct(70);
       const url = await uploadToCloudinary(file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
       setUploadPct(100);
       set('photo', url);
@@ -962,9 +1026,10 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
             <div style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
               <button onClick={()=>fileRef.current.click()} disabled={uploading}>
                 {uploading
-                  ? <><span className="spinner"/>Uploading… {uploadPct?`${uploadPct}%`:''}</>
+                  ? <><span className="spinner"/>{uploadPct<50?'Beautifying…':'Uploading…'} {uploadPct?`${uploadPct}%`:''}</>
                   : form.photo ? '📷 Change photo' : '📷 Upload photo'}
               </button>
+              {!form.photo && AI_BEAUTIFY && <p style={{ fontSize:10, color:'var(--accent)', lineHeight:1.5 }}>✨ AI cleans up &amp; auto-tags on upload</p>}
               {!form.photo && <p style={{ fontSize:10, color:cloudinaryReady?'#39a855':'var(--text3)', lineHeight:1.5 }}>{cloudinaryReady?'☁ Uploads to Cloudinary CDN':'⚠ Cloudinary not configured'}</p>}
               {uploadErr && <p style={{ fontSize:10, color:'#c00', lineHeight:1.5 }}>{uploadErr}</p>}
               {form.photo && <button className="btn-danger" style={{ fontSize:11, padding:'4px' }} onClick={()=>{ set('photo',''); setUploadErr(''); }}>Remove photo</button>}
@@ -1062,12 +1127,21 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
       if (f.status === 'done') { results.push(null); continue; }
       setFiles(p => p.map((x,j) => j===i ? { ...x, status:'uploading' } : x));
       try {
+        const cats = categories || DEFAULT_CATEGORIES;
+        // AI beautify + auto-tag (falls back to the original photo on any failure)
+        const { file: beautified, meta } = await beautifyImage(f.file, cats);
+        // Resize to max 800px, then upload
+        const resized = await resizeImageFile(beautified, 800);
         let photoUrl = f.preview;
         if (cloudinaryReady) {
-          photoUrl = await uploadToCloudinary(f.file, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
+          photoUrl = await uploadToCloudinary(resized, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
         }
-        const cats = categories || DEFAULT_CATEGORIES;
-        const item = { name: f.file.name.replace(/\.[^.]+$/,''), category: cats[0]||'Other', color:'', tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null };
+        const item = {
+          name: (meta && meta.name) || f.file.name.replace(/\.[^.]+$/,''),
+          category: (meta && meta.category) || cats[0] || 'Other',
+          color: (meta && meta.color) || '',
+          tags: [], photo:photoUrl, purchaseLink:'', wornCount:0, lastWorn:null,
+        };
         results.push(item);
         setFiles(p => p.map((x,j) => j===i ? { ...x, status:'done', name:item.name } : x));
       } catch(err) {
@@ -1093,6 +1167,10 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
 
         {!cloudinaryReady && (
           <div className="ai-banner" style={{ marginBottom:12 }}>⚠ Cloudinary not set up — photos will be saved locally only.</div>
+        )}
+
+        {AI_BEAUTIFY && (
+          <div className="ai-banner" style={{ marginBottom:12 }}>✨ Each photo is auto-cleaned to a catalog look on #f8f8f5 and tagged with name, color &amp; category. You can edit anything afterward.</div>
         )}
 
         <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={e=>addFiles(e.target.files)} />
