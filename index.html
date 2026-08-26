@@ -2208,6 +2208,12 @@ function TripsTab({ trips, onSaveTrip, onDeleteTrip, items, outfits, onSaveOutfi
   const suitcaseItems = trip ? items.filter(i=>trip.itemIds.includes(i.id)) : [];
   const tripOutfits   = trip ? outfits.filter(o=>trip.outfitIds.includes(o.id)) : [];
 
+  // Group the suitcase by category (in the wardrobe's category order),
+  // color-sorted within each — mirrors the Wardrobe tab's sectioned layout.
+  const suitcaseGrouped = (categories || DEFAULT_CATEGORIES)
+    .map(cat => ({ cat, catItems: suitcaseItems.filter(i => i.category === cat).sort((a,b)=>colorRank(a.color)-colorRank(b.color)) }))
+    .filter(g => g.catItems.length > 0);
+
   const createTrip = async () => {
     const name = newName.trim(); if(!name) return;
     setBusy(true);
@@ -2299,8 +2305,20 @@ function TripsTab({ trips, onSaveTrip, onDeleteTrip, items, outfits, onSaveOutfi
           </div>
           {suitcaseItems.length===0
             ? <div className="empty-state" style={{ padding:'2.5rem 1rem' }}>Nothing packed yet.<br/><span style={{ fontSize:12 }}>Tap <strong>+ Add items</strong> to choose what's in your suitcase.</span></div>
-            : <div className="photo-grid" style={{ marginBottom:8 }}>
-                {suitcaseItems.map(item=><GridCard key={item.id} item={item} />)}
+            : <div style={{ marginBottom:8 }}>
+                {suitcaseGrouped.map(({ cat, catItems }) => (
+                  <div key={cat}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 0 8px' }}>
+                      <span style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.1em', whiteSpace:'nowrap' }}>
+                        {cat} <span style={{ fontWeight:400, opacity:0.7 }}>· {catItems.length}</span>
+                      </span>
+                      <div style={{ flex:1, height:1, background:'var(--border)' }} />
+                    </div>
+                    <div className="photo-grid" style={{ paddingTop:0 }}>
+                      {catItems.map(item=><GridCard key={item.id} item={item} />)}
+                    </div>
+                  </div>
+                ))}
               </div>
           }
 
