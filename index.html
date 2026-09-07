@@ -2115,6 +2115,14 @@ function ItemPickerModal({ items, initialSelected, onSave, onClose, categories }
     if(search && ![i.name,i.brand||'',i.color||'',...(i.tags||[])].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+  // Match the Wardrobe: sectioned by category (color-sorted within) when unfiltered,
+  // flat but color-sorted when a category filter or search is active.
+  const showSections = filterCat === 'All' && !search;
+  const grouped = showSections
+    ? cats
+        .map(cat => ({ cat, catItems: filtered.filter(i => i.category === cat).sort((a,b)=>colorRank(a.color)-colorRank(b.color)) }))
+        .filter(g => g.catItems.length > 0)
+    : null;
   return (
     <div className="overlay" onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{ background:'var(--bg)', borderRadius:'var(--radius-lg)', border:'1px solid var(--border2)', width:'min(760px,96vw)', maxHeight:'90vh', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 25px 80px rgba(0,0,0,0.3)', animation:'slideUp 0.2s ease' }}>
@@ -2131,9 +2139,25 @@ function ItemPickerModal({ items, initialSelected, onSave, onClose, categories }
         <div style={{ overflowY:'auto', flex:1 }}>
           {items.length===0
             ? <div className="empty-state">No items in your wardrobe yet.</div>
-            : <div className="photo-grid" style={{ gridTemplateColumns:'repeat(4,minmax(0,1fr))' }}>
-                {filtered.map(item=><GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}
-              </div>
+            : filtered.length===0
+              ? <div className="empty-state">No items match the filter.</div>
+              : grouped
+                ? grouped.map(({ cat, catItems }) => (
+                    <div key={cat}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 14px 6px' }}>
+                        <span style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.1em', whiteSpace:'nowrap' }}>
+                          {cat} <span style={{ fontWeight:400, opacity:0.7 }}>· {catItems.length}</span>
+                        </span>
+                        <div style={{ flex:1, height:1, background:'var(--border)' }} />
+                      </div>
+                      <div className="photo-grid" style={{ gridTemplateColumns:'repeat(4,minmax(0,1fr))', paddingTop:0 }}>
+                        {catItems.map(item=><GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}
+                      </div>
+                    </div>
+                  ))
+                : <div className="photo-grid" style={{ gridTemplateColumns:'repeat(4,minmax(0,1fr))' }}>
+                    {[...filtered].sort((a,b)=>colorRank(a.color)-colorRank(b.color)).map(item=><GridCard key={item.id} item={item} selectable selected={selected.includes(item.id)} onSelect={()=>toggle(item.id)} />)}
+                  </div>
           }
         </div>
         <div style={{ padding:'1rem 1.25rem', borderTop:'1px solid var(--border)', display:'flex', gap:8, flexShrink:0 }}>
