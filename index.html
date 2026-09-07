@@ -1117,7 +1117,7 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
 }
 
 /* ── Grid Card (photo-only) ── */
-function GridCard({ item, onClick, selectable, selected, onSelect }) {
+function GridCard({ item, onClick, selectable, selected, onSelect, outfitCount }) {
   return (
     <div
       className={`grid-card${selected?' selected':''}`}
@@ -1130,8 +1130,15 @@ function GridCard({ item, onClick, selectable, selected, onSelect }) {
       <div className="grid-card-emoji" style={{ display: item.photo ? 'none' : 'flex' }}>
         {CAT_EMOJI[item.category]||'👔'}
       </div>
+      {/* Bottom-left: how many outfits this item appears in */}
+      {outfitCount != null && (
+        <div title={`In ${outfitCount} outfit${outfitCount!==1?'s':''}`} style={{ position:'absolute', bottom:6, left:6, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', lineHeight:1.6, letterSpacing:'0.02em' }}>
+          ×{outfitCount}
+        </div>
+      )}
+      {/* Bottom-right: how many times worn */}
       {item.wornCount > 0 && (
-        <div style={{ position:'absolute', bottom:6, right:6, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', lineHeight:1.6, letterSpacing:'0.02em' }}>
+        <div title={`Worn ${item.wornCount} time${item.wornCount!==1?'s':''}`} style={{ position:'absolute', bottom:6, right:6, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', lineHeight:1.6, letterSpacing:'0.02em' }}>
           ×{item.wornCount}
         </div>
       )}
@@ -1255,7 +1262,7 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
 }
 
 /* ── Wardrobe Tab ── */
-function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudConfig, categories, tagGroups }) {
+function WardrobeTab({ items, outfits, onSaveItem, onDeleteItem, onSaveBulkItems, cloudConfig, categories, tagGroups }) {
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
   const [filterCat, setFilterCat] = useState('All');
@@ -1264,6 +1271,13 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
   const [showBulk, setShowBulk] = useState(false);
 
   const setCat = c => { setFilterCat(c); setFilterColor(''); };
+
+  // How many outfits each item appears in — shown as a ×N badge on the card.
+  const outfitCountByItem = useMemo(() => {
+    const counts = {};
+    (outfits || []).forEach(o => (o.itemIds || []).forEach(id => { counts[id] = (counts[id] || 0) + 1; }));
+    return counts;
+  }, [outfits]);
 
   const colorsInCat = useMemo(() => {
     if(filterCat === 'All') return [];
@@ -1361,12 +1375,12 @@ function WardrobeTab({ items, onSaveItem, onDeleteItem, onSaveBulkItems, cloudCo
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                 </div>
                 <div className="photo-grid" style={{ paddingTop: 0 }}>
-                  {catItems.map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
+                  {catItems.map(item => <GridCard key={item.id} item={item} onClick={setDetail} outfitCount={outfitCountByItem[item.id]||0} />)}
                 </div>
               </div>
             ))
           : <div className="photo-grid">
-              {[...filtered].sort((a,b)=>colorRank(a.color)-colorRank(b.color)).map(item => <GridCard key={item.id} item={item} onClick={setDetail} />)}
+              {[...filtered].sort((a,b)=>colorRank(a.color)-colorRank(b.color)).map(item => <GridCard key={item.id} item={item} onClick={setDetail} outfitCount={outfitCountByItem[item.id]||0} />)}
             </div>
       }
     </div>
@@ -2553,7 +2567,7 @@ function MainApp({ currentUser, onLogout }) {
       {/* Banners */}
 
       {/* Tab content */}
-      {tab==='wardrobe' && <WardrobeTab items={items} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
+      {tab==='wardrobe' && <WardrobeTab items={items} outfits={outfits} onSaveItem={handleSaveItem} onDeleteItem={handleDeleteItem} onSaveBulkItems={handleSaveBulkItems} cloudConfig={cloudConfig} categories={categories} tagGroups={tagGroups} />}
       {tab==='builder'  && <BuilderTab  items={items} onSaveOutfit={handleSaveOutfit} tagGroups={tagGroups} categories={categories} />}
       {tab==='outfits'  && <OutfitsTab  outfits={outfits} onSaveOutfit={handleSaveOutfit} onDeleteOutfit={handleDeleteOutfit} onLogWear={handleLogWear} items={items} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
       {tab==='trips'    && <TripsTab    trips={trips} onSaveTrip={handleSaveTrip} onDeleteTrip={handleDeleteTrip} items={items} outfits={outfits} onSaveOutfit={handleSaveOutfit} cloudConfig={cloudConfig} tagGroups={tagGroups} categories={categories} />}
