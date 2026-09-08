@@ -1131,7 +1131,7 @@ function GridCard({ item, onClick, selectable, selected, onSelect, outfitCount }
         {CAT_EMOJI[item.category]||'👔'}
       </div>
       {/* Bottom-left: how many outfits this item appears in */}
-      {outfitCount != null && (
+      {outfitCount > 0 && (
         <div title={`In ${outfitCount} outfit${outfitCount!==1?'s':''}`} style={{ position:'absolute', bottom:6, left:6, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', lineHeight:1.6, letterSpacing:'0.02em' }}>
           ×{outfitCount}
         </div>
