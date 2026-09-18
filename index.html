@@ -133,7 +133,7 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
   overflow: hidden; position: relative; min-height: 440px;
 }
 .detail-img-pane img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
+  width: 100%; height: 100%; object-fit: contain; display: block;
 }
 .detail-img-pane .no-photo {
   font-size: 80px; opacity: 0.35;
@@ -298,7 +298,7 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
 }
 .grid-card:hover { opacity: 0.88; }
 .grid-card img {
-  width: 100%; height: 100%; object-fit: cover;
+  width: 100%; height: 100%; object-fit: contain;
   display: block; transition: transform 0.3s ease;
 }
 .grid-card:hover img { transform: scale(1.04); }
@@ -375,7 +375,7 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
   font-size: 10px; font-weight: 700;
 }
 .carousel-card img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
+  width: 100%; height: 100%; object-fit: contain; display: block;
 }
 .carousel-card-emoji {
   position: absolute; inset: 0;
@@ -401,7 +401,7 @@ button:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
   background: var(--bg3); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; font-size: 13px;
 }
-.builder-chip-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.builder-chip-thumb img { width: 100%; height: 100%; object-fit: contain; }
 
 /* Legacy builder classes kept for EditOutfitModal */
 .builder-toolbar {
@@ -808,7 +808,7 @@ function SettingsModal({ onClose, currentUser, tagGroups, setTagGroups, categori
         const out = await res.json();
         if(!out.image) throw new Error('no image');
         const file = await dataUrlToFile(out.image, (it.name||'item')+'.png');
-        const resized = await resizeImageFile(file, 800);
+        const resized = await trimAndResizeTransparent(file, 800);
         const url = await uploadToCloudinary(resized, CLOUD_NAME, UPLOAD_PRESET);
         const patch = { photo: url };
         const m = out.meta;
@@ -995,6 +995,55 @@ const resizeImageFile = (file, maxDim = 800) => new Promise(resolve => {
   img.src = blobUrl;
 });
 
+/* ── Trim transparent margins + downscale (preserves alpha) ──
+   For AI-beautified cut-outs (transparent PNGs): crop to the item's opaque
+   bounding box so the stored image hugs the garment — this makes the collage
+   aspect-fit and overlapping items line up, and lets the grid show the whole
+   piece. Then scale the long side down to maxDim. A fully-opaque image (e.g. the
+   raw-photo fallback when beautify fails) is just downscaled — its bounding box
+   is the whole frame. Output is PNG so transparency survives (resizeImageFile
+   outputs JPEG, which would flatten alpha to a solid fill). */
+const trimAndResizeTransparent = (file, maxDim = 800, alphaThreshold = 12, pad = 4) => new Promise((resolve) => {
+  const img = new Image();
+  const blobUrl = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(blobUrl);
+    const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
+    let minX = naturalW, minY = naturalH, maxX = -1, maxY = -1;
+    try {
+      const measure = document.createElement('canvas');
+      measure.width = naturalW; measure.height = naturalH;
+      const mctx = measure.getContext('2d');
+      mctx.drawImage(img, 0, 0);
+      const { data } = mctx.getImageData(0, 0, naturalW, naturalH);
+      for (let y = 0; y < naturalH; y++) {
+        for (let x = 0; x < naturalW; x++) {
+          if (data[(y * naturalW + x) * 4 + 3] > alphaThreshold) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+    } catch { /* unreadable (tainted) — fall through to full frame */ }
+    // No opaque pixels found (opaque image, or unreadable) → keep the whole frame.
+    if (maxX < minX || maxY < minY) { minX = 0; minY = 0; maxX = naturalW - 1; maxY = naturalH - 1; }
+    minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+    maxX = Math.min(naturalW - 1, maxX + pad); maxY = Math.min(naturalH - 1, maxY + pad);
+    const cropW = maxX - minX + 1, cropH = maxY - minY + 1;
+    const scale = Math.min(1, maxDim / Math.max(cropW, cropH));
+    const outW = Math.max(1, Math.round(cropW * scale));
+    const outH = Math.max(1, Math.round(cropH * scale));
+    const out = document.createElement('canvas');
+    out.width = outW; out.height = outH;
+    out.getContext('2d').drawImage(img, minX, minY, cropW, cropH, 0, 0, outW, outH);
+    out.toBlob(blob => resolve(new File([blob], file.name.replace(/\.\w+$/, '') + '.png', { type: 'image/png' })), 'image/png');
+  };
+  img.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(file); };
+  img.src = blobUrl;
+});
+
 /* ── Item Add/Edit Modal ── */
 function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }) {
   const cats = categories || DEFAULT_CATEGORIES;
@@ -1017,8 +1066,8 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
     if (warn) setUploadErr(warn);
     setUploadPct(40);
 
-    // Resize to max 800px to reduce storage and upload time
-    const file = await resizeImageFile(beautified, 800);
+    // Trim transparent margins + resize to max 800px (keeps the cut-out's alpha)
+    const file = await trimAndResizeTransparent(beautified, 800);
 
     // Immediate local preview
     const localPreview = await fileToDataUrl(file);
@@ -1063,7 +1112,7 @@ function ItemModal({ item, onSave, onClose, cloudConfig, tagGroups, categories }
           <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handleFile} />
           <div style={{ display:'flex', gap:10, alignItems:'flex-start' }}>
             <div style={{ width:72, height:90, border:'1px solid var(--border2)', background:'var(--bg2)', overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, position:'relative', borderRadius:'var(--radius)' }}>
-              {form.photo ? <img src={form.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="preview" /> : <span>{CAT_EMOJI[form.category]||'👔'}</span>}
+              {form.photo ? <img src={form.photo} style={{ width:'100%', height:'100%', objectFit:'contain' }} alt="preview" /> : <span>{CAT_EMOJI[form.category]||'👔'}</span>}
               {uploading && <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }}><span className="spinner" style={{ borderColor:'#fff', borderTopColor:'transparent' }}/></div>}
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6, flex:1 }}>
@@ -1179,8 +1228,8 @@ function BulkUploadModal({ onClose, onSave, cloudConfig, categories }) {
         const cats = categories || DEFAULT_CATEGORIES;
         // AI beautify + auto-tag (falls back to the original photo on any failure)
         const { file: beautified, meta } = await beautifyImage(f.file, cats);
-        // Resize to max 800px, then upload
-        const resized = await resizeImageFile(beautified, 800);
+        // Trim transparent margins + resize, then upload (keeps the cut-out's alpha)
+        const resized = await trimAndResizeTransparent(beautified, 800);
         let photoUrl = f.preview;
         if (cloudinaryReady) {
           photoUrl = await uploadToCloudinary(resized, cloudConfig?.cloudName, cloudConfig?.uploadPreset);
@@ -1968,7 +2017,7 @@ function EditOutfitModal({ outfit, items, onSave, onClose, cloudConfig, tagGroup
                   {selectedItems.map(item=>(
                     <div key={item.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
                       <div style={{ width:30, height:38, borderRadius:'var(--radius)', overflow:'hidden', flexShrink:0, background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15 }}>
-                        {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : CAT_EMOJI[item.category]}
+                        {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'contain' }} alt="" /> : CAT_EMOJI[item.category]}
                       </div>
                       <div style={{ flex:1, minWidth:0 }}>
                         <p style={{ fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.name}</p>
@@ -2118,7 +2167,7 @@ function OutfitsTab({ outfits, onSaveOutfit, onDeleteOutfit, onLogWear, items, c
                       <div style={{ display:'flex', gap:6, flexWrap:'wrap', padding:'10px 10px', borderTop: outfit.photo ? '1px solid var(--border)' : 'none' }}>
                         {oi.map(item=>(
                           <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                            {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                            {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'contain' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
                           </div>
                         ))}
                       </div>
@@ -2248,7 +2297,7 @@ function AddOutfitModal({ outfits, items, excludeIds, onAdd, onClose }) {
                     <div style={{ display:'flex', gap:4, flex:1, minWidth:0 }}>
                       {oi.slice(0,5).map(item=>(
                         <div key={item.id} style={{ width:34, height:42, background:'var(--bg2)', borderRadius:4, overflow:'hidden', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14 }}>
-                          {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : CAT_EMOJI[item.category]}
+                          {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'contain' }} alt="" /> : CAT_EMOJI[item.category]}
                         </div>
                       ))}
                     </div>
@@ -2430,7 +2479,7 @@ function TripsTab({ trips, onSaveTrip, onDeleteTrip, items, outfits, onSaveOutfi
                         <div style={{ display:'flex', gap:6, flexWrap:'wrap', padding:'10px', borderTop:o.photo?'1px solid var(--border)':'none' }}>
                           {oi.map(item=>(
                             <div key={item.id} style={{ width:62, height:78, background:'var(--bg2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                              {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
+                              {item.photo ? <img src={item.photo} style={{ width:'100%', height:'100%', objectFit:'contain' }} alt="" onError={e=>e.target.style.display='none'} /> : <span style={{ fontSize:24 }}>{CAT_EMOJI[item.category]||'👔'}</span>}
                             </div>
                           ))}
                         </div>
