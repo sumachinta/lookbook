@@ -1,8 +1,7 @@
 // Supabase Edge Function: beautify
 // ---------------------------------------------------------------------------
 // Takes one raw clothing photo and returns:
-//   1. a clean catalog-style cut-out of the item on a TRANSPARENT background
-//      (PNG with alpha), and
+//   1. a clean catalog-style image on a solid #f8f8f5 background, and
 //   2. a short { name, color, category } tag set, constrained to the app's own
 //      COLOR_DICT and category list.
 //
@@ -40,7 +39,7 @@ const json = (body: unknown, status = 200) =>
 const BEAUTIFY_PROMPT = `Act as a professional e-commerce fashion product image editor. I will provide one reference image of a clothing item, footwear, handbag, jewelry, or accessory.
 Generate a clean catalog-style product image using these rules:
 1. ISOLATE ITEM: Remove the original background, person/model, hanger, props, tags, and unrelated objects. Show only the fashion item.
-2. BACKGROUND: Output the image on a FULLY TRANSPARENT background — the PNG alpha channel must be 0 (empty) everywhere except the item itself. Do NOT fill the background with any color, gradient, vignette, or studio backdrop, and do NOT add any drop shadow, contact shadow, or reflection. Keep the item's own edges clean and crisply anti-aliased against the transparency, with no white/gray halo or fringe.
+2. BACKGROUND: Use a uniform solid #f8f8f5 (RGB 248, 248, 245) background that fills the entire canvas. No gradients, no vignette, no visible studio backdrop, no off-white drift. Use only a very subtle soft shadow if needed.
 3. 3D FORM (IMPORTANT): Render garments as if worn on an INVISIBLE MANNEQUIN — a ghost-mannequin / hollow-body effect with natural three-dimensional body shape and volume. The piece should stand as if on an unseen body: collar, shoulders, sleeves, and torso filled out and structured. Do NOT present it as a flat lay lying down. (Shoes, bags, and jewelry stay in their natural upright product view.)
 4. CAMERA ANGLE (CRITICAL): Show the item in a strict straight-on, dead-center FRONT view, with the camera perpendicular to the garment. Absolutely NO three-quarter angle, NO side view, NO rotated, tilted, diagonal, or perspective view. The garment must be square to the frame and symmetric: shoulders level and equal in width, left and right sides mirroring each other, sleeves falling evenly on both sides. Center and straighten it; do not stretch, widen, shorten, or distort it.
 5. MATERIAL & FINISH: Remove ALL wrinkles, creases, and awkward folds for a crisp, freshly-pressed, brand-new look. Remove harsh shadows and glare. Preserve the authentic color, texture, drape, weave, and material — do not over-smooth into a plastic or painted look.
