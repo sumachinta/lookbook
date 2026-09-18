@@ -1612,6 +1612,50 @@ function computeCollageLayout(outfitItems) {
   return placements.map(({ itemId, x, y, w, h }) => ({ itemId, x, y, w, h }));
 }
 
+// ── Aspect-ratio fit ──────────────────────────────────────────────────────
+// The layout rules size each item's *box*, but the photo inside is drawn
+// object-fit: contain (letterboxed). Two bugs follow: (1) the box is bigger than
+// the visible garment, so the selection outline and the drag limit don't match
+// what you see, and (2) html2canvas ignores object-fit and stretches the image
+// to fill the box on export, so a saved collage looks distorted vs the editor.
+// Fix both by shrinking each box to the image's true aspect ratio
+// (aspectRatio = imageWidth / imageHeight), keeping the same center. The result
+// is exactly the rectangle the garment already occupied under contain, so the
+// box now hugs the garment and contain == fill (no stretch on export).
+const imageAspectCache = new Map();  // photo URL → naturalWidth / naturalHeight
+function loadImageAspect(src) {
+  if (imageAspectCache.has(src)) return Promise.resolve(imageAspectCache.get(src));
+  return new Promise((resolve, reject) => {
+    const probe = new Image();
+    probe.onload = () => {
+      const aspectRatio = probe.naturalHeight ? probe.naturalWidth / probe.naturalHeight : 1;
+      imageAspectCache.set(src, aspectRatio);
+      resolve(aspectRatio);
+    };
+    probe.onerror = reject;
+    probe.src = src;
+  });
+}
+function fitBoxToAspect(placement, aspectRatio) {
+  const boxAspectRatio = placement.w / placement.h;
+  let fittedW = placement.w, fittedH = placement.h;
+  if (aspectRatio > boxAspectRatio) fittedH = placement.w / aspectRatio;  // image wider → trim height
+  else                              fittedW = placement.h * aspectRatio;  // image taller → trim width
+  const centerX = placement.x + placement.w / 2;
+  const centerY = placement.y + placement.h / 2;
+  return { ...placement, w: fittedW, h: fittedH, x: centerX - fittedW / 2, y: centerY - fittedH / 2 };
+}
+// Measure each placement's photo and fit its box to that photo's aspect ratio.
+// Images that fail to load keep their original box.
+async function fitPlacementsToImages(placements, items) {
+  return Promise.all(placements.map(async placement => {
+    const item = items.find(i => i.id === placement.itemId);
+    if (!item?.photo) return placement;
+    try { return fitBoxToAspect(placement, await loadImageAspect(item.photo)); }
+    catch { return placement; }
+  }));
+}
+
 // Render a set of placements to a PNG blob off-screen (for auto-baking collages
 // without opening the editor). Swaps image srcs to same-origin blob URLs to
 // avoid canvas tainting, same trick the manual export uses.
@@ -1654,11 +1698,12 @@ async function generateCollage(outfit, items, cloudConfig) {
   if (!outfitItems.length) return null;
   const placements = computeCollageLayout(outfitItems);
   if (!placements.length) return null;
-  const blob = await renderCollageBlob(placements, items);
+  const fittedPlacements = await fitPlacementsToImages(placements, items);
+  const blob = await renderCollageBlob(fittedPlacements, items);
   if (!blob) return null;
   const file = new File([blob], `collage-${Date.now()}.png`, { type: 'image/png' });
   const url = await uploadToCloudinary(file, cloudConfig.cloudName, cloudConfig.uploadPreset);
-  return { url, placements };
+  return { url, placements: fittedPlacements };
 }
 
 function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initialPlacements }) {
@@ -1673,26 +1718,40 @@ function OutfitCollageModal({ outfit, items, cloudConfig, onSave, onClose, initi
   const outfitPhotoItems = () => items.filter(i => (outfit.itemIds||[]).includes(i.id) && i.photo);
 
   useEffect(() => {
-    const outfitItems = outfitPhotoItems();
-    if (initialPlacements?.length) {
-      // Restore a previously-saved arrangement so re-editing continues where it
-      // was left off; auto-place any pieces added since the layout was saved.
-      const savedById = {};
-      initialPlacements.forEach(p => { savedById[p.itemId] = p; });
-      const auto = computeCollageLayout(outfitItems);
-      const autoById = {};
-      auto.forEach(p => { autoById[p.itemId] = p; });
-      setPlacements(outfitItems.map(item =>
-        savedById[item.id]
-          ? { ...savedById[item.id], itemId: item.id }
-          : (autoById[item.id] || { itemId:item.id, w:120, h:120, x:30, y:30 })
-      ));
-    } else {
-      setPlacements(computeCollageLayout(outfitItems));
-    }
+    let cancelled = false;
+    (async () => {
+      const outfitItems = outfitPhotoItems();
+      let basePlacements;
+      if (initialPlacements?.length) {
+        // Restore a previously-saved arrangement so re-editing continues where it
+        // was left off; auto-place any pieces added since the layout was saved.
+        const savedById = {};
+        initialPlacements.forEach(p => { savedById[p.itemId] = p; });
+        const auto = computeCollageLayout(outfitItems);
+        const autoById = {};
+        auto.forEach(p => { autoById[p.itemId] = p; });
+        basePlacements = outfitItems.map(item =>
+          savedById[item.id]
+            ? { ...savedById[item.id], itemId: item.id }
+            : (autoById[item.id] || { itemId:item.id, w:120, h:120, x:30, y:30 })
+        );
+      } else {
+        basePlacements = computeCollageLayout(outfitItems);
+      }
+      // Snap each box to its photo's aspect ratio so the editor matches the saved
+      // result and previously-saved (stretched) layouts get corrected on open.
+      const fitted = await fitPlacementsToImages(basePlacements, outfitItems);
+      if (!cancelled) setPlacements(fitted);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  const autoArrange = () => { setSelectedId(null); setPlacements(computeCollageLayout(outfitPhotoItems())); };
+  const autoArrange = async () => {
+    setSelectedId(null);
+    const outfitItems = outfitPhotoItems();
+    const fitted = await fitPlacementsToImages(computeCollageLayout(outfitItems), outfitItems);
+    setPlacements(fitted);
+  };
 
   const handlePointerDown = (e, itemId) => {
     e.preventDefault();
